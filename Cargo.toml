@@ -1,0 +1,19 @@
+[package]
+name = "zellij-smart-tabs"
+version = "0.1.0"
+edition = "2021"
+description = "A Zellij plugin that auto-renames tabs using configurable templates"
+repository = "https://github.com/yesyouken/zellij-smart-tabs"
+license = "MIT"
+keywords = ["zellij", "plugin", "tabs", "terminal"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+zellij-tile = "0.44"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+minijinja = { version = "2", default-features = false, features = ["builtins", "serde"] }
+kdl = "6"
+
+[dev-dependencies]
+mockall = "0.13"
