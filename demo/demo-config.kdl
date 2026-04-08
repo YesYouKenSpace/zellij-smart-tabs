@@ -1,0 +1,36 @@
+plugins {
+    smart-tabs location="file:~/.config/zellij/plugins/zellij-smart-tabs.wasm" {
+
+    }
+}
+load_plugins {
+    smart-tabs
+}
+keybinds {
+    tab {
+        bind "r" {
+            // It sets the tab to manual mode first, then enters rename mode.
+            MessagePlugin "smart-tabs" {
+                name "set_focused_to_manual"
+            }
+            SwitchToMode "RenameTab"
+            TabNameInput 0
+        }
+    }
+    renametab {
+        bind "esc" {
+            UndoRenameTab
+            SwitchToMode "tab"
+            // It sets the tab to managed mode.
+            MessagePlugin "smart-tabs" {
+                name "set_focused_to_managed"
+            }
+        }
+    }
+}
+options {
+    welcome_screen false
+    show_startup_tips false
+    show_release_notes false
+}
+
