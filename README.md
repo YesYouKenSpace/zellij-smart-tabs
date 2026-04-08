@@ -1,6 +1,6 @@
 # zellij-smart-tabs
 
-A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. Heavily-inspired by Dia and Arc by The Browser Company (we are not affiliated, I am just a big fan of what they are doing).
+A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. 
 
 ## Features
 - **Smart renaming** - auto-renames tabs based on configurable Jinja2-like templates (powered by MiniJinja) with context-aware variables (`short_dir`, `short_git_root`, `program`)
