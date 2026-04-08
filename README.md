@@ -2,7 +2,10 @@
 
 A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. Heavily-inspired by Dia and Arc by The Browser Company (we are not affiliated, I am just a big fan of what they are doing).
 
-<video src="demo/demo.webm" controls muted autoplay loop></video>
+<p align="center">
+  <video src="demo/demo.webm" width="100%" controls muted autoplay>
+  </video>
+</p>
 
 ## Objective
 
