@@ -61,6 +61,7 @@ struct ZellijSmartTabsPlugin {
     scroll_offsets: [usize; 5],
     log_buffer: VecDeque<String>,
     last_rename: Option<String>,
+    version_error: Option<String>,
 }
 
 #[cfg(not(test))]
@@ -78,7 +79,37 @@ impl Default for ZellijSmartTabsPlugin {
             scroll_offsets: [0; 5],
             log_buffer: VecDeque::new(),
             last_rename: None,
+            version_error: None,
         }
+    }
+}
+
+const MIN_ZELLIJ_VERSION: (u32, u32, u32) = (0, 44, 0);
+
+fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts
+        .next()
+        .and_then(|p| p.split('-').next().unwrap_or(p).parse().ok())
+        .unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+#[cfg(not(test))]
+fn check_zellij_version() -> Option<String> {
+    let version = get_zellij_version();
+    match parse_semver(&version) {
+        Some(v) if v >= MIN_ZELLIJ_VERSION => None,
+        Some(_) => Some(format!(
+            "zellij-smart-tabs requires Zellij {}.{}.{} or later, but found {}",
+            MIN_ZELLIJ_VERSION.0, MIN_ZELLIJ_VERSION.1, MIN_ZELLIJ_VERSION.2, version
+        )),
+        None => Some(format!(
+            "zellij-smart-tabs could not parse Zellij version: {:?}",
+            version
+        )),
     }
 }
 
@@ -96,8 +127,6 @@ impl ZellijSmartTabsPlugin {
                 .unwrap_or(p)
         })
     }
-
-
 
     fn initialize(&mut self, configuration: BTreeMap<String, String>) {
         self.config = Some(Config::from_map(&configuration));
@@ -654,7 +683,13 @@ impl ZellijSmartTabsPlugin {
 
         if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
             if pane.status != new_status {
-                debug_log!(self, "pane {} status: {} -> {}", pane_id, pane.status, new_status);
+                debug_log!(
+                    self,
+                    "pane {} status: {} -> {}",
+                    pane_id,
+                    pane.status,
+                    new_status
+                );
                 let tab_id = pane.tab_id;
                 pane.status = new_status;
                 self.schedule_rename(tab_id);
@@ -669,8 +704,14 @@ impl ZellijSmartTabsPlugin {
             return false;
         }
         match message.name.as_str() {
-            PIPE_SET_MANUAL => { self.set_focused_managed(false); true }
-            PIPE_SET_MANAGED => { self.set_focused_managed(true); true }
+            PIPE_SET_MANUAL => {
+                self.set_focused_managed(false);
+                true
+            }
+            PIPE_SET_MANAGED => {
+                self.set_focused_managed(true);
+                true
+            }
             PIPE_PANE_STATUS => {
                 if let Some(payload) = &message.payload {
                     self.handle_pane_status(payload);
@@ -685,6 +726,13 @@ impl ZellijSmartTabsPlugin {
 #[cfg(not(test))]
 impl ZellijPlugin for ZellijSmartTabsPlugin {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
+        self.version_error = check_zellij_version();
+        if self.version_error.is_some() {
+            show_self(true);
+            subscribe(&[EventType::Key]);
+            return;
+        }
+
         show_self(true);
         request_permission(&[
             PermissionType::ReadApplicationState,
@@ -716,6 +764,10 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
+        if let Some(error) = &self.version_error {
+            ui::render_version_error(rows, cols, error);
+            return;
+        }
         ui::render_dashboard(
             rows,
             cols,
@@ -755,6 +807,7 @@ mod tests {
             scroll_offsets: [0; 5],
             log_buffer: VecDeque::new(),
             last_rename: None,
+            version_error: None,
         }
     }
 
@@ -981,5 +1034,29 @@ mod tests {
         plugin.handle_event(Event::PermissionRequestResult(PermissionStatus::Granted));
         assert!(plugin.permissions_granted);
         plugin.flush_pending_renames();
+    }
+
+    #[test]
+    fn test_parse_semver() {
+        assert_eq!(parse_semver("0.44.0"), Some((0, 44, 0)));
+        assert_eq!(parse_semver("0.44.1"), Some((0, 44, 1)));
+        assert_eq!(parse_semver("1.0.0"), Some((1, 0, 0)));
+        assert_eq!(parse_semver("0.44.0-beta"), Some((0, 44, 0)));
+        assert_eq!(parse_semver("0.43"), Some((0, 43, 0)));
+        assert_eq!(parse_semver(""), None);
+        assert_eq!(parse_semver("abc"), None);
+    }
+
+    #[test]
+    fn test_version_check_passes() {
+        assert!(parse_semver("0.44.0").unwrap() >= MIN_ZELLIJ_VERSION);
+        assert!(parse_semver("0.45.0").unwrap() >= MIN_ZELLIJ_VERSION);
+        assert!(parse_semver("1.0.0").unwrap() >= MIN_ZELLIJ_VERSION);
+    }
+
+    #[test]
+    fn test_version_check_fails() {
+        assert!(parse_semver("0.43.0").unwrap() < MIN_ZELLIJ_VERSION);
+        assert!(parse_semver("0.43.9").unwrap() < MIN_ZELLIJ_VERSION);
     }
 }
