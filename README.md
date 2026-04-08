@@ -1,8 +1,12 @@
 # zellij-smart-tabs
 
+<video width="320" height="240" controls autoplay>
+  <source src="demo/demo.webm" type="video/webm">
+  Your browser does not support the video tag.
+</video>
+
 A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. 
 
-<video src="demo/demo.webm" controls muted autoplay loop></video>
 
 ## Objective
 
