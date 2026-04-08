@@ -1,0 +1,3 @@
+#!/bin/sh
+  notify-send -e 'Claude Pending ❇️'
+	zellij pipe --plugin smart-tabs --name pane_status --plugin smart-tabs -- "{\"pane_id\":\"$ZELLIJ_PANE_ID\",\"status\":\"pending\"}"

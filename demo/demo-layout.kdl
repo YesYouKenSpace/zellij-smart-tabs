@@ -1,0 +1,25 @@
+layout {
+    tab cwd="~/Projects/zellij-smart-tabs" {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        pane
+    }
+    tab cwd="~/dotfiles" {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane
+            pane cwd="~/Projects"
+        }
+    }
+    tab cwd="/tmp" {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        pane command="bash" {
+            args "-c" "zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}' && sleep 3 && zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}' && sleep 2 && zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"idle\"}'"
+        }
+    }
+}
