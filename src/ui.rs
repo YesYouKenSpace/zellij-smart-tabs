@@ -227,6 +227,30 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
     }
 }
 
+pub fn render_version_error(rows: usize, cols: usize, error: &str) {
+    if rows < 3 || cols < 10 {
+        return;
+    }
+    let lines = [
+        "zellij-smart-tabs",
+        "",
+        error,
+        "",
+        "Please upgrade Zellij to 0.44.0 or later.",
+        "https://zellij.dev/documentation/installation",
+    ];
+    for (i, line) in lines.iter().take(rows).enumerate() {
+        let text = if i == 0 {
+            Text::new(*line).color_all(0)
+        } else if i == 2 {
+            Text::new(*line).color_all(1)
+        } else {
+            Text::new(*line)
+        };
+        print_text_with_coordinates(text, 0, i, Some(cols), None);
+    }
+}
+
 fn render_shortcuts(rows: usize, cols: usize) {
     let shortcuts = "1-5:View  Tab:Next  j/k:Scroll  g/G:Top/Bot  Esc:Hide";
     print_text_with_coordinates(
