@@ -53,7 +53,7 @@ make install
 Alias the plugin and load the plugin on startup. Replace `v0.0.2` with the latest version
 ```kdl
 plugins {
-    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.0.2/zellij-smart-tabs.wasm" {
+    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.1.0/zellij-smart-tabs.wasm" {
         // where config for the plugin should go
     }
 }
