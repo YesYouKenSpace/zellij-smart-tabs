@@ -1,9 +1,9 @@
 # zellij-smart-tabs
 
-
-https://github.com/user-attachments/assets/e9ce05ce-677d-41ff-9707-7946323cac20
-
-
+<video width="320" height="240" controls autoplay>
+  <source src="demo/demo.webm" type="video/webm">
+  Your browser does not support the video tag.
+</video>
 
 A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. 
 
@@ -45,7 +45,7 @@ make install
 ```
 
 ### Prerequisites
-
+- **[Zellij](https://zellij.dev/) 0.44.0+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0
 - **[Nerd Font](https://www.nerdfonts.com/)** - the default substitutions use Nerd Font icons. Install one from [nerdfonts.com](https://www.nerdfonts.com/font-downloads) and configure your terminal to use it. Without a Nerd Font, icons will appear as missing glyphs.
 
 ## Quickstart
