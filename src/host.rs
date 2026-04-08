@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::tab_state::{PaneStore, TabStore};
-
 #[cfg(test)]
 use mockall::automock;
 
@@ -21,8 +19,6 @@ pub trait ZellijHost {
     fn get_pane_running_command(&self, pane_id: u32) -> Result<Vec<String>, String>;
     fn hide_self(&self);
     fn get_focused_tab_position(&self) -> Option<usize>;
-    fn save_state(&self, tab_store: &TabStore, pane_store: &PaneStore);
-    fn load_state(&self) -> (TabStore, PaneStore);
 }
 
 #[cfg(not(test))]
@@ -54,7 +50,9 @@ impl ZellijHost for RealZellijHost {
     }
 
     fn get_pane_running_command(&self, pane_id: u32) -> Result<Vec<String>, String> {
-        zellij_tile::prelude::get_pane_running_command(zellij_tile::prelude::PaneId::Terminal(pane_id))
+        zellij_tile::prelude::get_pane_running_command(zellij_tile::prelude::PaneId::Terminal(
+            pane_id,
+        ))
     }
 
     fn hide_self(&self) {
@@ -65,13 +63,5 @@ impl ZellijHost for RealZellijHost {
         zellij_tile::prelude::get_focused_pane_info()
             .ok()
             .map(|(tab_index, _)| tab_index)
-    }
-
-    fn save_state(&self, tab_store: &TabStore, pane_store: &PaneStore) {
-        let _ = crate::persistence::save(tab_store, pane_store);
-    }
-
-    fn load_state(&self) -> (TabStore, PaneStore) {
-        crate::persistence::load()
     }
 }

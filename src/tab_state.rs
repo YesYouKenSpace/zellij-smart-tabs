@@ -3,8 +3,9 @@ use std::collections::HashMap;
 
 pub const DEFAULT_STATUS: &str = "idle";
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PaneState {
+    #[allow(dead_code)] // Redundant with HashMap key; kept for test assertions and debugging
     pub pane_id: u32,
     pub tab_id: usize,
     pub position: usize,
@@ -36,7 +37,7 @@ impl PaneState {
     }
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default)]
 pub struct PaneStore {
     pub panes: HashMap<u32, PaneState>,
 }
@@ -50,7 +51,7 @@ impl PaneStore {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TabState {
     pub tab_id: usize,
     pub position: usize,
@@ -69,7 +70,7 @@ impl TabState {
     }
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default)]
 pub struct TabStore {
     pub tabs: HashMap<usize, TabState>,
 }

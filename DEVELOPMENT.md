@@ -57,7 +57,6 @@ src/
   template.rs      MiniJinja template rendering
   ui.rs            Dashboard UI (Status, Tabs, Panes, Log, Help views)
   host.rs          Host trait — abstracts Zellij API calls for testability
-  persistence.rs   Save/load state to /data/*.json
   utils.rs         Utility functions (short_path, extract_program, parse_git_*)
 ```
 
