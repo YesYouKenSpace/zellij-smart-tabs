@@ -145,6 +145,3 @@ Navigation: `1-5` jump, `Tab`/`Shift+Tab` cycle, `j/k` scroll, `g/G` top/bottom,
 
 Zellij host calls are abstracted behind a trait (`src/host.rs`) and mocked in tests via `mockall`. The `ZellijPlugin` trait impl is `#[cfg(not(test))]` because WASM host functions don't link on the host target. Tests call `handle_event()` directly.
 
-## Persistence
-
-`TabStore` and `PaneStore` are serialized to `/data/tab_store.json` and `/data/pane_store.json` (Zellij's plugin-specific WASI path). Known limitation: `/data` is deleted on plugin unload, so state may not survive session resurrection.

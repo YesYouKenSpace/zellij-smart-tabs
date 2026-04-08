@@ -1,6 +1,5 @@
 mod config;
 mod host;
-mod persistence;
 mod tab_state;
 mod template;
 mod ui;
@@ -136,9 +135,6 @@ impl ZellijSmartTabsPlugin {
             self.config().format,
             self.config().poll_interval
         );
-        let (tab_store, pane_store) = self.host.load_state();
-        self.tab_store = tab_store;
-        self.pane_store = pane_store;
     }
 
     fn config(&self) -> &Config {
@@ -269,7 +265,6 @@ impl ZellijSmartTabsPlugin {
         for tab_id in needs_rename {
             self.rename_tab_for(tab_id);
         }
-        self.save_state();
     }
 
     fn handle_pane_update(&mut self, manifest: PaneManifest) {
@@ -378,7 +373,6 @@ impl ZellijSmartTabsPlugin {
 
         if changed {
             self.schedule_rename(tab_id);
-            self.save_state();
         }
     }
 
@@ -436,7 +430,6 @@ impl ZellijSmartTabsPlugin {
 
         if changed {
             self.schedule_rename(tab_id);
-            self.save_state();
         }
     }
 
@@ -515,10 +508,6 @@ impl ZellijSmartTabsPlugin {
         }
     }
 
-    fn save_state(&self) {
-        self.host.save_state(&self.tab_store, &self.pane_store);
-    }
-
     fn handle_key(&mut self, key: KeyWithModifier) {
         if key.has_no_modifiers() {
             match key.bare_key {
@@ -578,6 +567,12 @@ impl ZellijSmartTabsPlugin {
 
 impl ZellijSmartTabsPlugin {
     fn handle_event(&mut self, event: Event) -> bool {
+        if self.version_error.is_some() {
+            if let Event::Key(key) = event {
+                self.handle_key(key);
+            }
+            return true;
+        }
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 debug_log!(self, "permissions granted");
@@ -651,7 +646,6 @@ impl ZellijSmartTabsPlugin {
                         }
                     }
                 }
-                self.save_state();
             }
         }
     }
@@ -838,9 +832,7 @@ mod tests {
     #[test]
     fn test_tab_rename_on_cwd_change() {
         let mut mock = MockZellijHost::new();
-        mock.expect_load_state()
-            .returning(|| (TabStore::default(), PaneStore::default()));
-        mock.expect_save_state().returning(|_, _| ());
+
         mock.expect_set_timeout().returning(|_| ());
         mock.expect_rename_tab()
             .with(eq(1u64), eq("my-project".to_string()))
@@ -878,9 +870,7 @@ mod tests {
     #[test]
     fn test_manual_tab_skips_auto_rename() {
         let mut mock = MockZellijHost::new();
-        mock.expect_load_state()
-            .returning(|| (TabStore::default(), PaneStore::default()));
-        mock.expect_save_state().returning(|_, _| ());
+
         mock.expect_set_timeout().returning(|_| ());
         mock.expect_rename_tab().times(1).returning(|_, _| ());
         mock.expect_run_command().returning(|_, _, _, _| ());
@@ -917,9 +907,7 @@ mod tests {
     #[test]
     fn test_empty_name_restores_auto_management() {
         let mut mock = MockZellijHost::new();
-        mock.expect_load_state()
-            .returning(|| (TabStore::default(), PaneStore::default()));
-        mock.expect_save_state().returning(|_, _| ());
+
         mock.expect_set_timeout().returning(|_| ());
         mock.expect_rename_tab().returning(|_, _| ());
         mock.expect_run_command().returning(|_, _, _, _| ());
@@ -953,9 +941,7 @@ mod tests {
     #[test]
     fn test_timer_fetches_missing_cwd() {
         let mut mock = MockZellijHost::new();
-        mock.expect_load_state()
-            .returning(|| (TabStore::default(), PaneStore::default()));
-        mock.expect_save_state().returning(|_, _| ());
+
         mock.expect_rename_tab()
             .with(eq(1u64), eq("fetched-dir".to_string()))
             .times(1)
@@ -1004,9 +990,7 @@ mod tests {
     #[test]
     fn test_permissions_granted_triggers_rename() {
         let mut mock = MockZellijHost::new();
-        mock.expect_load_state()
-            .returning(|| (TabStore::default(), PaneStore::default()));
-        mock.expect_save_state().returning(|_, _| ());
+
         mock.expect_hide_self().times(1).returning(|| ());
         mock.expect_rename_tab()
             .with(eq(1u64), eq("my-project".to_string()))
