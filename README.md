@@ -2,6 +2,12 @@
 
 A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. Heavily-inspired by Dia and Arc by The Browser Company (we are not affiliated, I am just a big fan of what they are doing).
 
+<video src="demo/demo.webm" controls muted autoplay loop></video>
+
+## Objective
+
+I built this because I kept losing track of which tab was which. I wanted to glance at my tab bar and instantly know what's running where - without manually renaming tabs every time I switch projects or start a new tool. Now my tabs just tell me what I need to know.
+
 ## Features
 - **Smart renaming** - auto-renames tabs based on configurable Jinja2-like templates (powered by MiniJinja) with context-aware variables (`short_dir`, `short_git_root`, `program`)
 - **Pane-scoped templates** - reference specific panes in templates (`pane[0].*`, `pane[-1].*`) powered by MiniJinja
@@ -40,10 +46,10 @@ make install
 
 ## Quickstart
 
-Alias the plugin and load the plugin on startup
+Alias the plugin and load the plugin on startup. Replace `v0.0.2` with the latest version
 ```kdl
 plugins {
-    smart-tabs location="file:~/.config/zellij/plugins/zellij-smart-tabs.wasm" {
+    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.0.2/zellij-smart-tabs.wasm" {
         // where config for the plugin should go
     }
 }
@@ -62,8 +68,9 @@ All configuration is inline in the plugin block.
 | `format` | String | See [Format Gallery](#format-gallery) | Tab name template (Jinja2-like syntax) |
 | `poll_interval` | Number (seconds) | `5` | Timer fallback interval for polling |
 | `debounce` | Number (seconds) | `0.2` | Delay before applying tab rename after data changes |
-| `debug` | Bool | `false` | Enable debug logging to Zellij log |
+| `debug` | Bool | `true` | Enable debug logging to Zellij log |
 | `sub` | Block | - | Substitution rules (see below) |
+
 
 ### Substitutions
 
@@ -71,8 +78,8 @@ Map program names to custom display names using the `sub` block:
 
 ```kdl
 plugins {
-    // Note that throughout this guide, we will refer to the plugin via "smart-tabs" alias
-    smart-tabs location="file:~/.config/zellij/plugins/zellij-smart-tabs.wasm" {
+    // Note that throughout this guide, we will refer to the plugin via "smart-tabs" alias.
+    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.0.2/zellij-smart-tabs.wasm" {
         // where config for the plugin should go
         sub {
             program {
@@ -188,7 +195,7 @@ keybinds {
                 name "set_focused_to_manual"
             }
             SwitchToMode "RenameTab"
-            TabRename ""
+            TabNameInput 0
         }
     }
     renametab {
@@ -227,6 +234,41 @@ zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PAN
 
 Status is freeform - you can send any string. The [default status substitutions](#default-status-substitutions) are applied automatically. Custom statuses without a substitution are shown as-is.
 
+### Claude Code integration
+
+Use [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to automatically update pane status when Claude starts and finishes work.
+
+Add this to your Claude Code settings (`.claude/settings.json` or global settings):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}'"]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"pending\"}'"]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}'"]
+      }
+    ]
+  }
+}
+```
+
+This sets the pane status to `running` while Claude processes tool calls, `pending` between calls, and `done` when Claude finishes. `$ZELLIJ_PANE_ID` is set automatically by Zellij for processes running inside panes.
+
+For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
+
 ## Dashboard
 
 The plugin pane shows a tabbed dashboard with keyboard and mouse navigation.
@@ -255,9 +297,6 @@ The plugin pane shows a tabbed dashboard with keyboard and mouse navigation.
 
 Mouse click on the tab bar switches views. Mouse scroll works within views.
 
-## Philosophy
-
-I built this because I kept losing track of which tab was which. I wanted to glance at my tab bar and instantly know what's running where - without manually renaming tabs every time I switch projects or start a new tool. Now my tabs just tell me what I need to know.
 
 ## Alternatives
 
@@ -267,7 +306,7 @@ I built this because I kept losing track of which tab was which. I wanted to gla
 | **Renames** | Tabs | Tabs | Tabs | Tabs | Sessions |
 | **CWD detection** | Events + timer | zsh hook | Events | Shell hook (pipe) | OpenCode events |
 | **Shell support** | Any | zsh only | Any | Any (via pipe) | N/A |
-| **Configurable name format** | Yes | No | Yes | Yes (`{tab_position}`) | No |
+| **Configurable name format** | Yes | No | Yes | Yes | No |
 | **Manual rename detection** | Yes | No | No | No | No |
 | **Dashboard UI** | Yes | No | No | No | No |
 | **Standalone** | Yes | Yes (zsh required) | Yes | Yes | No |

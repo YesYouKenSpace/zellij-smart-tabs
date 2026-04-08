@@ -37,4 +37,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two-store model: `TabStore` (by tab_id) + `PaneStore` (by pane_id)
 - `ZellijHost` trait for testable Zellij API abstraction
 - MiniJinja template engine (Askama removed)
-- Module system removed in favor of direct pane state
