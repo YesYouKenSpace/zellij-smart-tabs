@@ -17,6 +17,8 @@ pub struct PaneState {
     /// Set when the pane is a command pane (started with `zellij run`).
     /// When set, `program` comes from this and we skip polling `get_pane_running_command`.
     pub terminal_command: Option<String>,
+    /// Raw output from `get_pane_running_command` for non-command panes.
+    pub running_command: Option<String>,
     pub status: String,
 }
 
@@ -185,12 +187,12 @@ mod tests {
         pane_store.panes.insert(10, PaneState {
             pane_id: 10, tab_id: 1, position: 0,
             cwd: Some("/home/user/a".into()), short_dir: Some("a".into()),
-            git_root: None, short_git_root: None, program: Some("nvim".into()), terminal_command: None, status: DEFAULT_STATUS.to_string(),
+            git_root: None, short_git_root: None, program: Some("nvim".into()), terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
         });
         pane_store.panes.insert(11, PaneState {
             pane_id: 11, tab_id: 1, position: 1,
             cwd: Some("/home/user/b".into()), short_dir: Some("b".into()),
-            git_root: None, short_git_root: None, program: None, terminal_command: None, status: DEFAULT_STATUS.to_string(),
+            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
         });
 
         let tab1_panes = pane_store.panes_for_tab(1);
@@ -205,7 +207,7 @@ mod tests {
         let mut pane = PaneState {
             pane_id: 1, tab_id: 1, position: 0,
             cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, status: DEFAULT_STATUS.to_string(),
+            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
         };
         pane.set_cwd("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_dir, Some("my-project".into()));
@@ -216,7 +218,7 @@ mod tests {
         let mut pane = PaneState {
             pane_id: 1, tab_id: 1, position: 0,
             cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, status: DEFAULT_STATUS.to_string(),
+            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
         };
         pane.set_git_root("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_git_root, Some("my-project".into()));

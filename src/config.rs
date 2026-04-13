@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %}{% if status %} {{ status }}{% endif %}";
+const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %} | {% if status %}{{ status }}{{% else %}} {% endif %}";
 
 #[derive(Debug, Clone)]
 pub struct Substitutions {

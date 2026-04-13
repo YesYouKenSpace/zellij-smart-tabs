@@ -334,6 +334,7 @@ impl ZellijSmartTabsPlugin {
                             short_git_root: None,
                             program,
                             terminal_command: pane.terminal_command.clone(),
+                            running_command: None,
                             status: tab_state::DEFAULT_STATUS.to_string(),
                         },
                     );
@@ -471,14 +472,17 @@ impl ZellijSmartTabsPlugin {
             .map(|(&id, _)| id)
             .collect();
         for pane_id in pane_ids {
-            let raw_program = self
+            let raw_cmd = self
                 .host
                 .get_pane_running_command(pane_id)
-                .ok()
+                .ok();
+            let running_command = raw_cmd.as_ref().map(|cmd| cmd.join(" "));
+            let raw_program = raw_cmd
                 .and_then(|cmd| extract_program(cmd.first().map(|s| s.as_str())));
             let new_program = self.substitute_program(raw_program);
             let label = pane_label(&self.pane_store, pane_id);
             if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
+                pane.running_command = running_command;
                 if pane.program != new_program {
                     debug_log!(self, "{} program -> {:?}", label, new_program);
                     changed_tabs.insert(pane.tab_id);

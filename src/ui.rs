@@ -136,7 +136,9 @@ fn render_panes(
     let mut all_tabs: Vec<_> = tab_store.tabs.values().collect();
     all_tabs.sort_by_key(|t| t.position);
 
-    let mut table = Table::new().add_row(vec!["Tab", "Pos", "CWD", "Git Root", "Program", "Status"]);
+    let mut table = Table::new().add_row(vec![
+        "Tab", "Pos", "CWD", "Git Root", "Program", "Terminal Cmd", "Running Cmd", "Status",
+    ]);
 
     for tab in &all_tabs {
         let panes = pane_store.panes_for_tab(tab.tab_id);
@@ -148,6 +150,8 @@ fn render_panes(
                 nonempty(p.short_dir.as_deref().unwrap_or("-")),
                 nonempty(p.short_git_root.as_deref().unwrap_or("-")),
                 nonempty(p.program.as_deref().unwrap_or("-")),
+                nonempty(p.terminal_command.as_deref().unwrap_or("-")),
+                nonempty(p.running_command.as_deref().unwrap_or("-")),
                 nonempty(p.status.as_str()),
             ]);
         }
