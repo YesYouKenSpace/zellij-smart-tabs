@@ -295,7 +295,10 @@ impl ZellijSmartTabsPlugin {
                 // For regular terminal panes, program is polled via get_pane_running_command in the timer.
                 let is_command_pane = pane.terminal_command.is_some();
                 let program = if is_command_pane {
-                    self.substitute_program(extract_program(pane.terminal_command.as_deref()))
+                    let tokens: Vec<&str> = pane.terminal_command.as_deref()
+                        .map(|s| s.split_whitespace().collect())
+                        .unwrap_or_default();
+                    self.substitute_program(extract_program(&tokens, &self.config().skip_programs))
                 } else {
                     None
                 };
@@ -478,7 +481,10 @@ impl ZellijSmartTabsPlugin {
                 .ok();
             let running_command = raw_cmd.as_ref().map(|cmd| cmd.join(" "));
             let raw_program = raw_cmd
-                .and_then(|cmd| extract_program(cmd.first().map(|s| s.as_str())));
+                .and_then(|cmd| {
+                    let tokens: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+                    extract_program(&tokens, &self.config().skip_programs)
+                });
             let new_program = self.substitute_program(raw_program);
             let label = pane_label(&self.pane_store, pane_id);
             if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %} | {% if status %}{{ status }}{{% else %}} {% endif %}";
 
@@ -35,12 +35,15 @@ impl Default for Substitutions {
     }
 }
 
+const DEFAULT_SKIP_PROGRAMS: &[&str] = &["sudo"];
+
 pub struct Config {
     pub format: String,
     pub poll_interval: f64,
     pub debounce: f64,
     pub debug: bool,
     pub substitutions: Substitutions,
+    pub skip_programs: HashSet<String>,
 }
 
 impl Config {
@@ -72,12 +75,25 @@ impl Config {
             substitutions.status.extend(user_subs.status);
         }
 
+        let mut skip_programs: HashSet<String> = DEFAULT_SKIP_PROGRAMS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if let Some(raw) = map.get("skip_programs") {
+            if let Ok(doc) = raw.parse::<kdl::KdlDocument>() {
+                for node in doc.nodes() {
+                    skip_programs.insert(node.name().to_string());
+                }
+            }
+        }
+
         Self {
             format,
             poll_interval,
             debounce,
             debug,
             substitutions,
+            skip_programs,
         }
     }
 }
@@ -215,6 +231,21 @@ mod tests {
             c.substitutions.program.get("claude"),
             defaults.program.get("claude")
         );
+    }
+
+    #[test]
+    fn test_skip_programs_defaults() {
+        let c = Config::from_map(&BTreeMap::new());
+        assert!(c.skip_programs.contains("sudo"));
+    }
+
+    #[test]
+    fn test_skip_programs_kdl() {
+        let raw = "doas\nnohup";
+        let c = config_with(&[("skip_programs", raw)]);
+        assert!(c.skip_programs.contains("sudo")); // default preserved
+        assert!(c.skip_programs.contains("doas"));
+        assert!(c.skip_programs.contains("nohup"));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 /// Extract the last path component from a full path.
 pub fn short_path(path: &str) -> String {
     path.rsplit('/')
@@ -12,16 +14,20 @@ pub fn parse_git_root(stdout: &[u8]) -> Option<String> {
     if root.is_empty() { None } else { Some(root) }
 }
 
-/// Extract program name from a pane's terminal_command.
-/// Only reliable for command panes — regular terminal panes have terminal_command = None.
-pub fn extract_program(terminal_command: Option<&str>) -> Option<String> {
-    terminal_command.and_then(parse_program_name)
-}
-
-fn parse_program_name(cmd: &str) -> Option<String> {
-    let first_token = cmd.split_whitespace().next()?;
-    let basename = first_token.rsplit('/').next().unwrap_or(first_token);
-    if basename.is_empty() { None } else { Some(basename.to_string()) }
+/// Extract program name from a command, skipping wrapper programs (e.g. "sudo").
+/// Iterates tokens, strips path prefixes, skips any in the skip set, returns first match.
+pub fn extract_program(cmd: &[&str], skip: &HashSet<String>) -> Option<String> {
+    for token in cmd {
+        let basename = token.rsplit('/').next().unwrap_or(token);
+        if basename.is_empty() {
+            continue;
+        }
+        if skip.contains(basename) {
+            continue;
+        }
+        return Some(basename.to_string());
+    }
+    None
 }
 
 
@@ -45,19 +51,18 @@ mod tests {
 
     #[test]
     fn test_extract_program() {
-        assert_eq!(extract_program(Some("nvim src/main.rs")), Some("nvim".into()));
-        assert_eq!(extract_program(Some("/usr/bin/nvim")), Some("nvim".into()));
-        assert_eq!(extract_program(Some("cargo build --release")), Some("cargo".into()));
-        assert_eq!(extract_program(None), None);
+        let no_skip = HashSet::new();
+        assert_eq!(extract_program(&["nvim", "src/main.rs"], &no_skip), Some("nvim".into()));
+        assert_eq!(extract_program(&["/usr/bin/nvim"], &no_skip), Some("nvim".into()));
+        assert_eq!(extract_program(&["cargo", "build", "--release"], &no_skip), Some("cargo".into()));
+        assert_eq!(extract_program(&[], &no_skip), None);
     }
 
     #[test]
-    fn test_extract_program_from_cmd_vec() {
-        let cmd = vec!["nvim".to_string(), "src/main.rs".to_string()];
-        assert_eq!(extract_program(cmd.first().map(|s| s.as_str())), Some("nvim".into()));
-        let cmd2 = vec!["/usr/bin/nvim".to_string()];
-        assert_eq!(extract_program(cmd2.first().map(|s| s.as_str())), Some("nvim".into()));
-        let empty: Vec<String> = vec![];
-        assert_eq!(extract_program(empty.first().map(|s| s.as_str())), None);
+    fn test_extract_program_skips_wrappers() {
+        let skip: HashSet<String> = ["sudo".to_string()].into();
+        assert_eq!(extract_program(&["sudo", "nvim", "file.rs"], &skip), Some("nvim".into()));
+        assert_eq!(extract_program(&["/usr/bin/sudo", "/usr/bin/nvim"], &skip), Some("nvim".into()));
+        assert_eq!(extract_program(&["sudo"], &skip), None);
     }
 }

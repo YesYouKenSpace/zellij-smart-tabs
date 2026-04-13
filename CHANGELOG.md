@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- feat: configurable skip_programs to skip wrapper commands (e.g. sudo) during program detection
 - feat: display terminal_command and running_command in Panes UI view
 - fix: default tab format template to show status with pipe separator
 - security: Workflow does not contain permissions (#9)
