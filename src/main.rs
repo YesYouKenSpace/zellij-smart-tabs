@@ -125,15 +125,14 @@ fn check_zellij_version() -> Option<String> {
 register_plugin!(ZellijSmartTabsPlugin);
 
 impl ZellijSmartTabsPlugin {
-    fn substitute_program(&self, program: Option<String>) -> Option<String> {
-        program.map(|p| {
-            self.config()
-                .substitutions
-                .program
-                .get(&p)
-                .cloned()
-                .unwrap_or(p)
-        })
+    fn substitute_program(&self, program: Option<String>) -> (Option<String>, bool) {
+        match program {
+            Some(p) => match self.config().substitutions.program.get(&p) {
+                Some(substitution) => (Some(substitution.clone()), true),
+                None => (Some(p), false),
+            },
+            None => (None, false),
+        }
     }
 
     fn initialize(&mut self, configuration: BTreeMap<String, String>) {
@@ -191,6 +190,7 @@ impl ZellijSmartTabsPlugin {
                 "git_root": p.git_root,
                 "short_git_root": p.short_git_root,
                 "program": p.program,
+                "program_substituted": p.program_substituted,
                 "screen_state": p.screen_state(),
                 "screen_status": p.screen_status(),
                 "screen_changed": p.screen_changed,
@@ -308,7 +308,7 @@ impl ZellijSmartTabsPlugin {
                 // For command panes, terminal_command is the definitive program source.
                 // For regular terminal panes, program is polled via get_pane_running_command in the timer.
                 let is_command_pane = pane.terminal_command.is_some();
-                let program = if is_command_pane {
+                let (program, program_substituted) = if is_command_pane {
                     let tokens: Vec<&str> = pane
                         .terminal_command
                         .as_deref()
@@ -316,7 +316,7 @@ impl ZellijSmartTabsPlugin {
                         .unwrap_or_default();
                     self.substitute_program(extract_program(&tokens, &self.config().skip_programs))
                 } else {
-                    None
+                    (None, false)
                 };
 
                 if let Some(existing) = self.pane_store.panes.get_mut(&pane.id) {
@@ -333,8 +333,12 @@ impl ZellijSmartTabsPlugin {
                         existing.terminal_command = pane.terminal_command.clone();
                         changed = true;
                     }
-                    if is_command_pane && existing.program != program {
+                    if is_command_pane
+                        && (existing.program != program
+                            || existing.program_substituted != program_substituted)
+                    {
                         existing.program = program;
+                        existing.program_substituted = program_substituted;
                         changed = true;
                     }
                     if changed {
@@ -348,6 +352,7 @@ impl ZellijSmartTabsPlugin {
                             tab.tab_id,
                             pos,
                             program,
+                            program_substituted,
                             pane.terminal_command.clone(),
                         ),
                     );
@@ -491,14 +496,17 @@ impl ZellijSmartTabsPlugin {
                 let tokens: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
                 extract_program(&tokens, &self.config().skip_programs)
             });
-            let new_program = self.substitute_program(raw_program);
+            let (new_program, new_program_substituted) = self.substitute_program(raw_program);
             let label = pane_label(&self.pane_store, pane_id);
             if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
                 pane.running_command = running_command;
-                if pane.program != new_program {
+                if pane.program != new_program
+                    || pane.program_substituted != new_program_substituted
+                {
                     debug_log!(self, "{} program -> {:?}", label, new_program);
                     changed_tabs.insert(pane.tab_id);
                     pane.program = new_program;
+                    pane.program_substituted = new_program_substituted;
                 }
             }
 
@@ -1066,7 +1074,7 @@ mod tests {
                 is_managed: true,
             },
         );
-        let mut pane = PaneState::new(10, 1, 0, Some("nvim".into()), None);
+        let mut pane = PaneState::new(10, 1, 0, Some("nvim".into()), false, None);
         pane.cwd = Some("/home/user/project".into());
         pane.short_dir = Some("project".into());
         pane.screen_hash = Some(1);
@@ -1114,6 +1122,7 @@ mod tests {
             1,
             0,
             Substitutions::default().program.get("nvim").cloned(),
+            true,
             None,
         );
         pane.cwd = Some("/home/user/project".into());
@@ -1162,6 +1171,7 @@ mod tests {
             1,
             0,
             Substitutions::default().program.get("nvim").cloned(),
+            true,
             None,
         );
         pane.cwd = Some("/home/user/project".into());

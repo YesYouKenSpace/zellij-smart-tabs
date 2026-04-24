@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} {{ program }}{% endif %}{% if screen_status %} {{ screen_status }}{% endif %}";
+const DEFAULT_FORMAT: &str = "{% if short_git_root %} {{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}{% if program_substituted %} {{ program }}{% else %}({{ program }}){% endif %}{% endif %}{% if screen_status %}{{ screen_status }}{% endif %}";
 
 #[derive(Debug, Clone)]
 pub struct Substitutions {
@@ -10,13 +10,36 @@ pub struct Substitutions {
 impl Default for Substitutions {
     fn default() -> Self {
         let program = [
+            ("bash", "\u{f489}"),
+            ("bun", "\u{e76f}"),
+            ("cargo", "\u{e7a8}"),
             ("nvim", "\u{e6ae}"),
             ("vim", "\u{e7c5}"),
             ("claude", "\u{f069}"),
             ("codex", "\u{eac4}"),
+            ("docker", "\u{f308}"),
+            ("docker-compose", "\u{f308}"),
+            ("emacs", "\u{e632}"),
+            ("fish", "\u{f489}"),
+            ("gh", "\u{f09b}"),
+            ("git", "\u{e702}"),
             ("node", "\u{f0399}"),
-            ("zsh", "\u{f489}"),
+            ("npm", "\u{e71e}"),
+            ("opencode", "\u{eac4}"),
+            ("pnpm", "\u{e71e}"),
+            ("python", "\u{e73c}"),
+            ("python3", "\u{e73c}"),
+            ("rg", "\u{f002}"),
+            ("ripgrep", "\u{f002}"),
+            ("rustc", "\u{e7a8}"),
+            ("tmux", "\u{f489}"),
+            ("uv", "\u{e73c}"),
+            ("yarn", "\u{e6a7}"),
             ("go", "\u{e627}"),
+            ("kubectl", "⎈"),
+            ("k9s", "⎈"),
+            ("helm", "⎈"),
+            ("zsh", "\u{f489}"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -140,7 +163,9 @@ mod tests {
     fn test_defaults() {
         let c = Config::from_map(&BTreeMap::new());
         assert!(c.format.contains("short_git_root"));
+        assert!(c.format.contains(""));
         assert!(c.format.contains("short_dir"));
+        assert!(c.format.contains("program_substituted"));
         assert_eq!(c.poll_interval, 2.0);
         assert_eq!(c.debounce, 0.2);
         assert!(!c.debug);
@@ -153,6 +178,49 @@ mod tests {
         assert_eq!(
             c.substitutions.program.get("claude"),
             defaults.program.get("claude")
+        );
+    }
+
+    #[test]
+    fn test_common_default_program_substitutions() {
+        let defaults = Substitutions::default();
+        for program in [
+            "bash", "bun", "cargo", "docker", "gh", "git", "kubectl", "node", "npm", "opencode",
+            "pnpm", "python", "python3", "rg", "rustc", "tmux", "uv", "yarn", "zsh",
+        ] {
+            assert!(
+                defaults.program.contains_key(program),
+                "missing default substitution for {program}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_format_uses_spaced_substituted_program() {
+        let c = Config::from_map(&BTreeMap::new());
+        let ctx = minijinja::Value::from_serialize(&serde_json::json!({
+            "short_dir": "project",
+            "program": "",
+            "program_substituted": true,
+            "screen_status": "",
+        }));
+
+        assert_eq!(crate::template::render(&c.format, &ctx), "project ");
+    }
+
+    #[test]
+    fn test_default_format_wraps_raw_program_without_space() {
+        let c = Config::from_map(&BTreeMap::new());
+        let ctx = minijinja::Value::from_serialize(&serde_json::json!({
+            "short_dir": "project",
+            "program": "custom-cli",
+            "program_substituted": false,
+            "screen_status": "",
+        }));
+
+        assert_eq!(
+            crate::template::render(&c.format, &ctx),
+            "project(custom-cli)"
         );
     }
 

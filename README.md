@@ -99,13 +99,36 @@ The `{{ program }}` template variable will show the substituted value. Programs 
 
 | Program | Substitution | Unicode |
 |---|---|---|
+| `bash` |  | `\u{f489}` |
+| `bun` |  | `\u{e76f}` |
+| `cargo` |  | `\u{e7a8}` |
 | `nvim` |  | `\u{e6ae}` |
 | `vim` |  | `\u{e7c5}` |
 | `claude` |  | `\u{f069}` |
 | `codex` | 󰒰 | `\u{eac4}` |
+| `docker` |  | `\u{f308}` |
+| `docker-compose` |  | `\u{f308}` |
+| `emacs` |  | `\u{e632}` |
+| `fish` |  | `\u{f489}` |
+| `gh` |  | `\u{f09b}` |
+| `git` |  | `\u{e702}` |
 | `node` | 󰎙 | `\u{f0399}` |
-| `zsh` |  | `\u{f489}` |
+| `npm` |  | `\u{e71e}` |
+| `opencode` | 󰒰 | `\u{eac4}` |
+| `pnpm` |  | `\u{e71e}` |
+| `python` |  | `\u{e73c}` |
+| `python3` |  | `\u{e73c}` |
+| `rg` |  | `\u{f002}` |
+| `ripgrep` |  | `\u{f002}` |
+| `rustc` |  | `\u{e7a8}` |
+| `tmux` |  | `\u{f489}` |
+| `uv` |  | `\u{e73c}` |
+| `yarn` |  | `\u{e6a7}` |
 | `go` | | `\u{e627}` |
+| `kubectl` | ⎈ | `\u{2388}` |
+| `k9s` | ⎈ | `\u{2388}` |
+| `helm` | ⎈ | `\u{2388}` |
+| `zsh` |  | `\u{f489}` |
 
 #### Screen activity status
 
@@ -127,7 +150,8 @@ These are [Nerd Font](https://www.nerdfonts.com/) icons. Make sure your terminal
 | `cwd` | String | Full path of the pane's working directory |
 | `short_git_root` | String or undefined | Last component of the git repository root path |
 | `git_root` | String or undefined | Full path to the git repository root |
-| `program` | String or undefined | Currently running program (e.g., `nvim`, `claude`, `opencode`) |
+| `program` | String or undefined | Currently running program after substitution (e.g., ``, ``, or raw `cmd`) |
+| `program_substituted` | Boolean | `true` when `program` matched a configured substitution |
 | `screen_state` | String | Viewport state: `unknown`, `changed`, or `stable` |
 | `screen_status` | String | Icon for the viewport state |
 | `screen_changed` | Boolean | `true` when viewport text changed on the last poll |
@@ -145,9 +169,10 @@ Top-level variables (e.g., `{{ short_dir }}`) are aliases for `pane[0].*` (first
 A collection of format strings for different workflows. Copy one into your plugin config:
 
 ```kdl
-// Default - IDE-style: project + file context + screen activity
-format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} {{ program }}{% endif %}{% if screen_status %} {{ screen_status }}{% endif %}"
-// => my-repo nvim 
+// Default - IDE-style: git project marker + icon/raw command + screen activity
+format "{% if short_git_root %} {{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}{% if program_substituted %} {{ program }}{% else %}({{ program }}){% endif %}{% endif %}{% if screen_status %}{{ screen_status }}{% endif %}"
+// =>  my-repo 
+// => my-folder(custom-cli)
 
 // Minimal - just the directory name
 format "{{ short_dir }}"

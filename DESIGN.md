@@ -83,6 +83,7 @@ Built per-tab from both stores:
   "short_git_root": "my-project",
   "git_root": "/home/user/my-project",
   "program": "nvim",
+  "program_substituted": true,
   "screen_state": "changed",
   "screen_status": "",
   "screen_changed": true,
