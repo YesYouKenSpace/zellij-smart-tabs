@@ -318,66 +318,69 @@ If you prefer not to install the plugin (e.g. you're using these hooks outside C
 
 ### Codex CLI integration
 
-OpenAI's Codex CLI has a hook system analogous to Claude Code's, behind the experimental `codex_hooks` feature flag. Unlike Claude Code, Codex plugins cannot ship hooks (they only bundle MCP servers, skills, and apps), so Codex integration is always a one-time `~/.codex/config.toml` edit — there's no equivalent of `/plugin install`.
+OpenAI's Codex CLI has a hook system analogous to Claude Code's, behind the experimental `codex_hooks` feature flag. Unlike Claude Code, Codex plugins cannot ship hooks (they only bundle MCP servers, skills, and apps), so Codex integration is a one-time `~/.codex/config.toml` edit — there's no equivalent of `/plugin install`.
 
-Three ways to set it up, pick whichever fits:
+This repo ships [`scripts/setup-codex.sh`](scripts/setup-codex.sh) to handle it. The script is self-contained and does **not** depend on Claude Code being installed.
 
-**Option 1 — standalone script (pure Codex users, no Claude Code needed):**
+#### Install
 
 ```bash
-# Clone this repo somewhere, then:
-./scripts/setup-codex.sh --apply          # append to ~/.codex/config.toml (idempotent)
+# Inside a clone of this repo:
+./scripts/setup-codex.sh --apply
 
-# Or one-shot via curl, if you trust it:
+# Or one-shot via curl (inspect the script first if you're cautious):
 curl -fsSL https://raw.githubusercontent.com/YesYouKenSpace/zellij-smart-tabs/main/scripts/setup-codex.sh | bash -s -- --apply
 ```
 
-Drop `--apply` to just print the snippet to stdout instead of writing.
+Then restart Codex (just exit and re-launch; next run loads the new config).
 
-**Option 2 — Claude Code slash command (if you also use Claude):**
+#### What the script does
 
-Install the `zellij-smart-tabs` Claude Code plugin (see [Claude Code integration](#claude-code-integration) above), then run `/setup-codex` inside Claude Code. It invokes the same script.
-
-**Option 3 — copy-paste (trust nothing, do it yourself):**
-
-Append this to `~/.codex/config.toml`:
+`--apply` appends a **managed block** to `~/.codex/config.toml`, delimited by two marker comments:
 
 ```toml
-[features]
-codex_hooks = true
-
-[[hooks.UserPromptSubmit]]
-[[hooks.UserPromptSubmit.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PreToolUse]]
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PostToolUse]]
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PermissionRequest]]
-[[hooks.PermissionRequest.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID help"'
-
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID ready"'
+# BEGIN zellij-smart-tabs managed block — do not edit inside
+...hooks...
+# END zellij-smart-tabs managed block
 ```
 
-Restart Codex after any of the three options.
+Everything outside the markers is never touched. Running `--apply` a second time detects the BEGIN marker and does nothing (idempotent). You can safely add your own `[hooks.*]` or other config immediately before or after the block — our script only ever reads and writes between the markers.
 
-Notes:
+#### Other modes
 
-- `codex_hooks = true` is a **feature flag**. If Codex rejects the config, check the latest release notes — the flag name or hook shape may have changed.
-- `PermissionRequest` is Codex's equivalent of Claude's `Notification` — it fires when Codex asks for approval to run a command.
+```bash
+./scripts/setup-codex.sh                    # print the managed block to stdout (no file changes)
+./scripts/setup-codex.sh --apply            # idempotent install (described above)
+./scripts/setup-codex.sh --remove           # uninstall — removes only lines between the markers
+./scripts/setup-codex.sh --help             # show full usage
+```
+
+Set `CODEX_CONFIG=/some/path/config.toml` to target a non-default location (the script honors this env var).
+
+#### Uninstall
+
+```bash
+./scripts/setup-codex.sh --remove
+```
+
+Removes only the managed block; any hooks you added outside the markers stay put. Re-running `--remove` when the block is already gone is a safe no-op.
+
+#### What gets installed
+
+The managed block enables the `codex_hooks` feature flag and wires five lifecycle events to `zellij pipe`:
+
+| Codex event | Status |
+|---|---|
+| `UserPromptSubmit` | `busy` |
+| `PreToolUse` | `busy` |
+| `PostToolUse` | `busy` |
+| `PermissionRequest` | `help` (Codex's equivalent of Claude's `Notification`) |
+| `Stop` | `ready` |
+
+#### Caveats
+
+- `codex_hooks = true` is an experimental **feature flag** in current Codex CLI source. The flag name or hook shape may change before it ships as stable. If Codex rejects the config, check the latest Codex release notes and compare against the managed block.
+- Codex CLI's hook events do not include a `StopFailure` equivalent, so an interrupted turn may leave `busy` stale until the next event. The Zellij plugin's program-change auto-reset is the backstop: when Codex exits (even via `kill -9`), the status clears within ~5 seconds.
 
 For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
 
