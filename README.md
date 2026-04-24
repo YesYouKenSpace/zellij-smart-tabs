@@ -318,9 +318,29 @@ If you prefer not to install the plugin (e.g. you're using these hooks outside C
 
 ### Codex CLI integration
 
-OpenAI's Codex CLI has a hook system analogous to Claude Code's, behind the experimental `codex_hooks` feature flag. Unlike Claude Code, Codex plugins cannot ship hooks — they only bundle MCP servers, skills, and apps. So integration is a one-time manual append to `~/.codex/config.toml`.
+OpenAI's Codex CLI has a hook system analogous to Claude Code's, behind the experimental `codex_hooks` feature flag. Unlike Claude Code, Codex plugins cannot ship hooks (they only bundle MCP servers, skills, and apps), so Codex integration is always a one-time `~/.codex/config.toml` edit — there's no equivalent of `/plugin install`.
 
-From Claude Code run `/setup-codex` to print the TOML snippet to paste. Or append this directly:
+Three ways to set it up, pick whichever fits:
+
+**Option 1 — standalone script (pure Codex users, no Claude Code needed):**
+
+```bash
+# Clone this repo somewhere, then:
+./scripts/setup-codex.sh --apply          # append to ~/.codex/config.toml (idempotent)
+
+# Or one-shot via curl, if you trust it:
+curl -fsSL https://raw.githubusercontent.com/YesYouKenSpace/zellij-smart-tabs/main/scripts/setup-codex.sh | bash -s -- --apply
+```
+
+Drop `--apply` to just print the snippet to stdout instead of writing.
+
+**Option 2 — Claude Code slash command (if you also use Claude):**
+
+Install the `zellij-smart-tabs` Claude Code plugin (see [Claude Code integration](#claude-code-integration) above), then run `/setup-codex` inside Claude Code. It invokes the same script.
+
+**Option 3 — copy-paste (trust nothing, do it yourself):**
+
+Append this to `~/.codex/config.toml`:
 
 ```toml
 [features]
@@ -352,9 +372,12 @@ type = "command"
 command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID ready"'
 ```
 
-`codex_hooks` is a feature flag in current Codex CLI source — it may change shape or stabilize under a different name in future versions. If Codex rejects the config, check the latest Codex release notes.
+Restart Codex after any of the three options.
 
-`PermissionRequest` is Codex's equivalent of Claude's `Notification` — it fires when Codex asks for approval to run a command.
+Notes:
+
+- `codex_hooks = true` is a **feature flag**. If Codex rejects the config, check the latest release notes — the flag name or hook shape may have changed.
+- `PermissionRequest` is Codex's equivalent of Claude's `Notification` — it fires when Codex asks for approval to run a command.
 
 For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
 

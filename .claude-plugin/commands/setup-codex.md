@@ -2,56 +2,21 @@
 description: Print the Codex CLI config snippet to enable automatic tab status updates for Codex
 ---
 
-OpenAI's Codex CLI has its own hook system behind the experimental `codex_hooks` feature flag. It's analogous to Claude Code's hooks, so we can wire the same busy / help / ready lifecycle.
-
-Print this TOML snippet and tell the user to append it to `~/.codex/config.toml`:
-
-```toml
-# Enable the experimental hooks feature. Remove this line if Codex ever
-# promotes hooks out of feature-flag status.
-[features]
-codex_hooks = true
-
-# Smart-tabs status hooks. Each one fires at a Codex lifecycle event and
-# pipes the current pane_id + status to the zellij-smart-tabs plugin.
-[[hooks.UserPromptSubmit]]
-[[hooks.UserPromptSubmit.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PreToolUse]]
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PostToolUse]]
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
-
-[[hooks.PermissionRequest]]
-[[hooks.PermissionRequest.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID help"'
-
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID ready"'
-```
-
-Then have the user restart Codex for the hooks to load:
+Run the shared setup script to print the Codex hook TOML snippet:
 
 ```bash
-# Just exit the current Codex session; next run picks up new config.
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-codex.sh"
 ```
 
-Caveats to mention to the user:
+Show the output to the user, then tell them to:
 
-1. `codex_hooks = true` is a **feature flag**. It exists in current Codex CLI source but may change shape or stabilize under a different name in future versions. If Codex complains about an unknown flag or hook shape, check the latest Codex release notes.
+1. Append the snippet to `~/.codex/config.toml`. If they prefer, they can run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-codex.sh" --apply` to append it automatically (idempotent — guarded by a marker comment, safe to re-run).
+2. Restart Codex for the new hooks to load.
 
-2. Codex plugins (via `/codex plugin install`) cannot ship hooks — only MCP servers, skills, and apps. That's why this is manual config rather than a one-command install like we have for Claude Code.
+Caveats to mention:
 
-3. The `PermissionRequest` event is Codex's equivalent of Claude's `Notification`. It fires when Codex asks to run a command that needs approval.
+1. `codex_hooks = true` is a **feature flag** in Codex CLI. It exists in current source but the flag name or hook shape may change before it ships as stable. If Codex complains about unknown fields, check the latest Codex release notes.
+2. Codex plugins can't ship hooks (only MCP servers / skills / apps), which is why this is config-file surgery rather than a one-command install like we have for Claude Code.
+3. `PermissionRequest` is Codex's equivalent of Claude's `Notification` — it fires when Codex asks for command approval, letting us render the `help` status.
 
-Do NOT edit `~/.codex/config.toml` directly — print the snippet and let the user paste. Merging TOML with existing `[features]` / `[hooks]` sections is fragile and a user's dotfile shouldn't be mutated without consent.
+Pure-Codex users who don't have Claude Code installed can run the same script standalone — it's in the repo at `scripts/setup-codex.sh`.
