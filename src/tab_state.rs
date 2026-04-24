@@ -1,7 +1,9 @@
 use crate::utils::short_path;
 use std::collections::HashMap;
 
-pub const DEFAULT_STATUS: &str = "idle";
+const SCREEN_UNKNOWN_ICON: &str = "\u{f128}";
+const SCREEN_CHANGED_ICON: &str = "\u{f252}";
+const SCREEN_STABLE_ICON: &str = "";
 
 #[derive(Debug, Clone)]
 pub struct PaneState {
@@ -19,10 +21,58 @@ pub struct PaneState {
     pub terminal_command: Option<String>,
     /// Raw output from `get_pane_running_command` for non-command panes.
     pub running_command: Option<String>,
-    pub status: String,
+    /// Hash of the last viewport read through Zellij's pane-content API.
+    pub screen_hash: Option<u64>,
+    /// True only for the most recent poll where viewport content changed.
+    pub screen_changed: bool,
+    /// Number of completed polls since the last observed viewport change.
+    pub screen_quiet_ticks: u32,
 }
 
 impl PaneState {
+    pub fn new(
+        pane_id: u32,
+        tab_id: usize,
+        position: usize,
+        program: Option<String>,
+        terminal_command: Option<String>,
+    ) -> Self {
+        Self {
+            pane_id,
+            tab_id,
+            position,
+            cwd: None,
+            short_dir: None,
+            git_root: None,
+            short_git_root: None,
+            program,
+            terminal_command,
+            running_command: None,
+            screen_hash: None,
+            screen_changed: false,
+            screen_quiet_ticks: 0,
+        }
+    }
+
+    pub fn screen_state(&self) -> &'static str {
+        if self.screen_hash.is_none() {
+            "unknown"
+        } else if self.screen_changed {
+            "changed"
+        } else {
+            "stable"
+        }
+    }
+
+    pub fn screen_status(&self) -> &'static str {
+        match self.screen_state() {
+            "unknown" => SCREEN_UNKNOWN_ICON,
+            "changed" => SCREEN_CHANGED_ICON,
+            "stable" => SCREEN_STABLE_ICON,
+            _ => "",
+        }
+    }
+
     pub fn set_cwd(&mut self, cwd: String) {
         self.short_dir = Some(short_path(&cwd));
         self.cwd = Some(cwd);
@@ -119,7 +169,8 @@ impl TabStore {
 
     /// Find tab_id by tab position.
     pub fn tab_id_at_position(&self, position: usize) -> Option<usize> {
-        self.tabs.values()
+        self.tabs
+            .values()
             .find(|t| t.position == position)
             .map(|t| t.tab_id)
     }
@@ -132,9 +183,7 @@ mod tests {
     #[test]
     fn test_new_tabs_need_renaming() {
         let mut store = TabStore::default();
-        let needs = store.sync_tabs(
-            &[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())],
-        );
+        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())]);
         assert_eq!(needs.len(), 2);
     }
 
@@ -184,16 +233,14 @@ mod tests {
     #[test]
     fn test_pane_store_queries() {
         let mut pane_store = PaneStore::default();
-        pane_store.panes.insert(10, PaneState {
-            pane_id: 10, tab_id: 1, position: 0,
-            cwd: Some("/home/user/a".into()), short_dir: Some("a".into()),
-            git_root: None, short_git_root: None, program: Some("nvim".into()), terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        });
-        pane_store.panes.insert(11, PaneState {
-            pane_id: 11, tab_id: 1, position: 1,
-            cwd: Some("/home/user/b".into()), short_dir: Some("b".into()),
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        });
+        let mut pane_a = PaneState::new(10, 1, 0, Some("nvim".into()), None);
+        pane_a.cwd = Some("/home/user/a".into());
+        pane_a.short_dir = Some("a".into());
+        pane_store.panes.insert(10, pane_a);
+        let mut pane_b = PaneState::new(11, 1, 1, None, None);
+        pane_b.cwd = Some("/home/user/b".into());
+        pane_b.short_dir = Some("b".into());
+        pane_store.panes.insert(11, pane_b);
 
         let tab1_panes = pane_store.panes_for_tab(1);
         assert_eq!(tab1_panes.len(), 2);
@@ -204,22 +251,14 @@ mod tests {
 
     #[test]
     fn test_pane_set_cwd_updates_short_dir() {
-        let mut pane = PaneState {
-            pane_id: 1, tab_id: 1, position: 0,
-            cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        };
+        let mut pane = PaneState::new(1, 1, 0, None, None);
         pane.set_cwd("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_dir, Some("my-project".into()));
     }
 
     #[test]
     fn test_pane_set_git_root_updates_short() {
-        let mut pane = PaneState {
-            pane_id: 1, tab_id: 1, position: 0,
-            cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        };
+        let mut pane = PaneState::new(1, 1, 0, None, None);
         pane.set_git_root("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_git_root, Some("my-project".into()));
     }

@@ -72,9 +72,7 @@ mod tests {
 
     #[test]
     fn test_undefined_pane_index() {
-        let panes = vec![
-            serde_json::json!({"short_dir": "my-project"}),
-        ];
+        let panes = vec![serde_json::json!({"short_dir": "my-project"})];
         let ctx = context! {
             short_dir => "my-project",
             pane => Value::from_serialize(&panes)

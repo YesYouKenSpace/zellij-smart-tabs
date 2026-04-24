@@ -17,6 +17,7 @@ pub trait ZellijHost {
     fn set_timeout(&self, secs: f64);
     fn get_pane_cwd(&self, pane_id: u32) -> Result<PathBuf, String>;
     fn get_pane_running_command(&self, pane_id: u32) -> Result<Vec<String>, String>;
+    fn get_pane_viewport(&self, pane_id: u32) -> Result<Vec<String>, String>;
     fn hide_self(&self);
     fn get_focused_tab_position(&self) -> Option<usize>;
 }
@@ -53,6 +54,14 @@ impl ZellijHost for RealZellijHost {
         zellij_tile::prelude::get_pane_running_command(zellij_tile::prelude::PaneId::Terminal(
             pane_id,
         ))
+    }
+
+    fn get_pane_viewport(&self, pane_id: u32) -> Result<Vec<String>, String> {
+        zellij_tile::prelude::get_pane_scrollback(
+            zellij_tile::prelude::PaneId::Terminal(pane_id),
+            false,
+        )
+        .map(|contents| contents.viewport)
     }
 
     fn hide_self(&self) {

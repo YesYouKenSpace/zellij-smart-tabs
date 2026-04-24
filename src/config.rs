@@ -1,20 +1,19 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} \u{eab6} {{ program }}{% endif %}{% if status %} {{ status }}{% endif %}";
+const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} {{ program }}{% endif %}{% if screen_status %} {{ screen_status }}{% endif %}";
 
 #[derive(Debug, Clone)]
 pub struct Substitutions {
     pub program: HashMap<String, String>,
-    pub status: HashMap<String, String>,
 }
 
 impl Default for Substitutions {
     fn default() -> Self {
         let program = [
             ("nvim", "\u{e6ae}"),
-            ("vim", "\u{37c5}"),
+            ("vim", "\u{e7c5}"),
             ("claude", "\u{f069}"),
-            ("codex", "\u{f120}"),
+            ("codex", "\u{f4b0}"),
             ("node", "\u{f0399}"),
             ("zsh", "\u{f489}"),
             ("go", "\u{e627}"),
@@ -22,20 +21,7 @@ impl Default for Substitutions {
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-        let status = [
-            ("idle", ""),
-            ("busy", "\u{f252}"),
-            ("help", "\u{f128}"),
-            ("ready", "\u{f05d}"),
-            ("error", "\u{ea87}"),
-            ("running", "\u{f252}"),
-            ("pending", "\u{f252}"),
-            ("done", "\u{f05d}"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-        Self { program, status }
+        Self { program }
     }
 }
 
@@ -60,7 +46,7 @@ impl Config {
         let poll_interval = map
             .get("poll_interval")
             .and_then(|v| v.trim().parse::<f64>().ok())
-            .unwrap_or(5.0);
+            .unwrap_or(2.0);
 
         let debounce = map
             .get("debounce")
@@ -76,7 +62,6 @@ impl Config {
         if let Some(raw) = map.get("sub") {
             let user_subs = parse_substitutions(raw);
             substitutions.program.extend(user_subs.program);
-            substitutions.status.extend(user_subs.status);
         }
 
         let mut skip_programs: HashSet<String> = DEFAULT_SKIP_PROGRAMS
@@ -119,22 +104,18 @@ impl Config {
 fn parse_substitutions(raw: &str) -> Substitutions {
     let mut subs = Substitutions {
         program: HashMap::new(),
-        status: HashMap::new(),
     };
     let doc = match raw.parse::<kdl::KdlDocument>() {
         Ok(doc) => doc,
         Err(_) => return subs,
     };
 
-    for (section_name, map) in [("program", &mut subs.program), ("status", &mut subs.status)] {
-        if let Some(node) = doc.get(section_name) {
-            if let Some(children) = node.children() {
-                for child in children.nodes() {
-                    let key = child.name().to_string();
-                    if let Some(value) = child.entries().first().and_then(|e| e.value().as_string())
-                    {
-                        map.insert(key, value.to_string());
-                    }
+    if let Some(node) = doc.get("program") {
+        if let Some(children) = node.children() {
+            for child in children.nodes() {
+                let key = child.name().to_string();
+                if let Some(value) = child.entries().first().and_then(|e| e.value().as_string()) {
+                    subs.program.insert(key, value.to_string());
                 }
             }
         }
@@ -160,7 +141,7 @@ mod tests {
         let c = Config::from_map(&BTreeMap::new());
         assert!(c.format.contains("short_git_root"));
         assert!(c.format.contains("short_dir"));
-        assert_eq!(c.poll_interval, 5.0);
+        assert_eq!(c.poll_interval, 2.0);
         assert_eq!(c.debounce, 0.2);
         assert!(!c.debug);
         // Default substitutions are populated
@@ -196,7 +177,7 @@ mod tests {
     #[test]
     fn test_invalid_poll_interval_uses_default() {
         let c = config_with(&[("poll_interval", "not_a_number")]);
-        assert_eq!(c.poll_interval, 5.0);
+        assert_eq!(c.poll_interval, 2.0);
     }
 
     #[test]

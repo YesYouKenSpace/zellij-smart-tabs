@@ -6,7 +6,11 @@ use zellij_tile::prelude::*;
 pub const VIEW_COUNT: usize = 5;
 
 fn nonempty(s: &str) -> &str {
-    if s.is_empty() { " " } else { s }
+    if s.is_empty() {
+        " "
+    } else {
+        s
+    }
 }
 
 pub const APPROX_TAB_WIDTH: usize = 12;
@@ -127,17 +131,20 @@ fn render_tabs(
     };
 }
 
-fn render_panes(
-    rows: usize,
-    cols: usize,
-    tab_store: &TabStore,
-    pane_store: &PaneStore,
-) {
+fn render_panes(rows: usize, cols: usize, tab_store: &TabStore, pane_store: &PaneStore) {
     let mut all_tabs: Vec<_> = tab_store.tabs.values().collect();
     all_tabs.sort_by_key(|t| t.position);
 
     let mut table = Table::new().add_row(vec![
-        "Tab", "Pos", "CWD", "Git Root", "Program", "Terminal Cmd", "Running Cmd", "Status",
+        "Tab",
+        "Pos",
+        "CWD",
+        "Git Root",
+        "Program",
+        "Terminal Cmd",
+        "Running Cmd",
+        "Screen",
+        "Icon",
     ]);
 
     for tab in &all_tabs {
@@ -152,7 +159,8 @@ fn render_panes(
                 nonempty(p.program.as_deref().unwrap_or("-")),
                 nonempty(p.terminal_command.as_deref().unwrap_or("-")),
                 nonempty(p.running_command.as_deref().unwrap_or("-")),
-                nonempty(p.status.as_str()),
+                p.screen_state(),
+                nonempty(p.screen_status()),
             ]);
         }
     }
@@ -197,6 +205,18 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
         "  {{ short_git_root }}  Last component of git root",
     ));
     lines.push(Text::new("  {{ program }}         Running program name"));
+    lines.push(Text::new(
+        "  {{ screen_state }}    Pane viewport state: unknown/changed/stable",
+    ));
+    lines.push(Text::new(
+        "  {{ screen_status }}   Icon for the current viewport state",
+    ));
+    lines.push(Text::new(
+        "  {{ screen_changed }}  True when viewport changed on the last poll",
+    ));
+    lines.push(Text::new(
+        "  {{ screen_quiet_ticks }} Polls since the last viewport change",
+    ));
     lines.push(Text::new(""));
     lines.push(Text::new("Pane-scoped access:").dim_all());
     lines.push(Text::new("  {{ pane.last.program }}         Last pane"));
@@ -259,6 +279,9 @@ fn render_shortcuts(rows: usize, cols: usize) {
     let shortcuts = "1-5:View  Tab:Next  j/k:Scroll  g/G:Top/Bot  Esc:Hide";
     print_text_with_coordinates(
         Text::new(shortcuts).dim_all(),
-        0, rows.saturating_sub(1), Some(cols), None,
+        0,
+        rows.saturating_sub(1),
+        Some(cols),
+        None,
     );
 }
