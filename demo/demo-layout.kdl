@@ -19,7 +19,7 @@ layout {
             plugin location="tab-bar"
         }
         pane command="bash" {
-            args "-c" "zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}' && sleep 3 && zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}' && sleep 2 && zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"idle\"}'"
+            args "-c" "for i in 1 2 3; do echo screen activity $i; sleep 2; done; exec bash"
         }
     }
 }

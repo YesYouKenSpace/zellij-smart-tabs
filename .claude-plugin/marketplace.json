@@ -5,13 +5,13 @@
     "url": "https://github.com/YesYouKenSpace/zellij-smart-tabs"
   },
   "metadata": {
-    "description": "Single-plugin marketplace for the zellij-smart-tabs Claude Code integration.",
+    "description": "Single-plugin marketplace for the zellij-smart-tabs setup helper.",
     "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "zellij-smart-tabs",
-      "description": "Auto-update Zellij tab status (busy / help / ready) based on Claude Code lifecycle.",
+      "description": "Helper commands for installing the zellij-smart-tabs Zellij plugin.",
       "version": "0.2.0",
       "source": "./"
     }

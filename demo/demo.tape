@@ -68,19 +68,11 @@ Type ":q"
 Enter
 Sleep 5s
 
-# --- Scene 4: Pane status via pipe ---
-Type "echo '📡 Programs can report status via pipe (running → done → idle)'"
+# --- Scene 4: Screen activity detection ---
+Type "echo '📡 Screen activity is detected from viewport changes'"
 Enter
 Sleep 2s
 
-Type@30ms `zellij pipe --plugin smart-tabs --name pane_status -- "{\"pane_id\":\"$ZELLIJ_PANE_ID\",\"status\":\"running\"}"`
+Type@30ms `for i in 1 2 3; do echo "screen activity $i"; sleep 2; done`
 Enter
-Sleep 3s
-
-Type@30ms `zellij pipe --plugin smart-tabs --name pane_status -- "{\"pane_id\":\"$ZELLIJ_PANE_ID\",\"status\":\"done\"}"`
-Enter
-Sleep 3s
-
-Type@30ms `zellij pipe --plugin smart-tabs --name pane_status -- "{\"pane_id\":\"$ZELLIJ_PANE_ID\",\"status\":\"idle\"}"`
-Enter
-Sleep 3s
+Sleep 7s

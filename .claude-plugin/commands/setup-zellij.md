@@ -2,7 +2,7 @@
 description: Print the Zellij config snippet required to load the zellij-smart-tabs plugin
 ---
 
-The zellij-smart-tabs Claude Code plugin auto-updates tab status, but it needs the Zellij-side WASM plugin loaded too. Print the config snippet the user should add to `~/.config/zellij/config.kdl`, using the current released WASM URL:
+Print the config snippet the user should add to `~/.config/zellij/config.kdl`, using the current released WASM URL:
 
 ```kdl
 plugins {

@@ -1,7 +1,7 @@
 {
   "name": "zellij-smart-tabs",
   "version": "0.2.0",
-  "description": "Auto-update Zellij tab status (busy / help / ready) based on Claude Code lifecycle. Pairs with the zellij-smart-tabs Zellij plugin.",
+  "description": "Helper commands for installing the zellij-smart-tabs Zellij plugin.",
   "author": {
     "name": "YesYouKenSpace",
     "url": "https://github.com/YesYouKenSpace/zellij-smart-tabs"
