@@ -14,6 +14,7 @@ impl Default for Substitutions {
             ("nvim", "\u{e6ae}"),
             ("vim", "\u{37c5}"),
             ("claude", "\u{f069}"),
+            ("codex", "\u{f120}"),
             ("node", "\u{f0399}"),
             ("zsh", "\u{f489}"),
             ("go", "\u{e627}"),
