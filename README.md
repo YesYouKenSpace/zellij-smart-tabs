@@ -108,13 +108,17 @@ The `{{ program }}` template variable will show the substituted value. Programs 
 
 #### Default status substitutions
 
-| Status | Substitution | Unicode |
-|---|---|---|
-| `idle` | *(empty - hidden)* | `""` |
-| `running` | | `\u{f110}` |
-| `pending` | 󰂚 | `\u{f009a}` |
-| `done` | | `\u{f05d}` |
-| `error` | | `\u{ea87}` |
+Three primary states designed for AI agent workflows (Claude Code, Codex, etc.):
+
+| Status | Substitution | Unicode | Meaning |
+|---|---|---|---|
+| `busy` |  | `\u{f252}` | Agent is working |
+| `help` |  | `\u{f128}` | Agent needs user input (permission, question) |
+| `ready` |  | `\u{f05d}` | Agent finished, waiting for next prompt |
+| `error` |  | `\u{ea87}` | Something went wrong |
+| `idle` | *(empty - hidden)* | `""` | No activity |
+
+Legacy aliases kept for backward compatibility: `running` / `pending` map to `busy`'s icon, `done` maps to `ready`'s icon.
 
 These are [Nerd Font](https://www.nerdfonts.com/) icons. Make sure your terminal uses a Nerd Font for them to render correctly. Override any substitution in the `sub` block.
 
@@ -127,7 +131,7 @@ These are [Nerd Font](https://www.nerdfonts.com/) icons. Make sure your terminal
 | `short_git_root` | String or undefined | Last component of the git repository root path |
 | `git_root` | String or undefined | Full path to the git repository root |
 | `program` | String or undefined | Currently running program (e.g., `nvim`, `claude`, `opencode`) |
-| `status` | String | Pane activity status (freeform, set via pipe). Defaults: `idle`, `running`, `pending`, `done`, `error`. |
+| `status` | String | Pane activity status (freeform, set via pipe). Defaults: `idle`, `busy`, `help`, `ready`, `error` (legacy: `running`, `pending`, `done`). |
 
 All variables are also available scoped to specific panes:
 
@@ -244,29 +248,47 @@ Add this to your Claude Code settings (`.claude/settings.json` or global setting
 ```json
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"pending\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"help\"}'"]
       }
     ],
     "Stop": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"ready\"}'"]
       }
     ]
   }
 }
 ```
 
-This sets the pane status to `running` while Claude processes tool calls, `pending` between calls, and `done` when Claude finishes. `$ZELLIJ_PANE_ID` is set automatically by Zellij for processes running inside panes.
+This maps Claude's lifecycle to three glanceable states:
+
+- `busy` — Claude is actively working (processing a prompt or running tools)
+- `help` — Claude sent a notification (permission request, question, or idle warning) and needs your attention
+- `ready` — Claude finished and is waiting for your next prompt
+
+`$ZELLIJ_PANE_ID` is set automatically by Zellij for processes running inside panes.
 
 For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
 

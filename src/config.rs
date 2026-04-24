@@ -23,10 +23,13 @@ impl Default for Substitutions {
         .collect();
         let status = [
             ("idle", ""),
-            ("running", "\u{f110}"),
-            ("pending", "\u{f009a}"),
-            ("done", "\u{f05d}"),
+            ("busy", "\u{f252}"),
+            ("help", "\u{f128}"),
+            ("ready", "\u{f05d}"),
             ("error", "\u{ea87}"),
+            ("running", "\u{f252}"),
+            ("pending", "\u{f252}"),
+            ("done", "\u{f05d}"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
