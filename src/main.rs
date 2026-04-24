@@ -62,8 +62,8 @@ struct ZellijSmartTabsPlugin {
     /// Tabs scheduled for rename on the next timer tick.
     /// Acts as a debounce — multiple events within one tick coalesce into a single rename.
     pending_renames: HashSet<usize>,
-    /// Counts debounce ticks since last poll. When it reaches the poll threshold,
-    /// a full poll cycle runs (refresh CWD, git, program).
+    /// Counts timer ticks between full polls. Poll-interval timers run a full
+    /// poll immediately; debounce timers use this as a guard against over-polling.
     poll_ticks: u32,
     active_view: usize,
     scroll_offsets: [usize; 5],
@@ -502,9 +502,11 @@ impl ZellijSmartTabsPlugin {
                 }
             }
 
-            // Refresh git info for panes with CWD on auto-managed tabs
+            // Fill git info for panes with CWD on auto-managed tabs. CWD changes
+            // already trigger a fresh git lookup, so avoid re-running git every poll
+            // once the root is known.
             let should_refresh_git = self.pane_store.panes.get(&pane_id).and_then(|p| {
-                if p.cwd.is_some() {
+                if p.cwd.is_some() && p.git_root.is_none() {
                     self.tab_store
                         .tabs
                         .get(&p.tab_id)
@@ -1042,6 +1044,136 @@ mod tests {
         let pane = plugin.pane_store.panes.get(&10).unwrap();
         assert_eq!(pane.screen_state(), "changed");
         assert_eq!(pane.screen_quiet_ticks, 0);
+    }
+
+    #[test]
+    fn test_debounce_timer_does_not_run_full_poll() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout()
+            .with(eq(2.0))
+            .times(1)
+            .returning(|_| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+        plugin.tab_store.tabs.insert(
+            1,
+            tab_state::TabState {
+                tab_id: 1,
+                position: 0,
+                name: "project".into(),
+                is_managed: true,
+            },
+        );
+        let mut pane = PaneState::new(10, 1, 0, Some("nvim".into()), None);
+        pane.cwd = Some("/home/user/project".into());
+        pane.short_dir = Some("project".into());
+        pane.screen_hash = Some(1);
+        plugin.pane_store.panes.insert(10, pane);
+        plugin.pending_renames.insert(1);
+
+        plugin.handle_event(Event::Timer(0.0));
+
+        assert_eq!(plugin.poll_ticks, 1);
+    }
+
+    #[test]
+    fn test_poll_timer_runs_full_poll() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_get_pane_running_command()
+            .with(eq(10u32))
+            .times(1)
+            .returning(|_| Ok(vec!["nvim".into()]));
+        mock.expect_get_pane_viewport()
+            .with(eq(10u32))
+            .times(1)
+            .returning(|_| Ok(vec!["same output".into()]));
+        mock.expect_run_command()
+            .times(1)
+            .returning(|_, _, _, _| ());
+        mock.expect_set_timeout()
+            .with(eq(2.0))
+            .times(1)
+            .returning(|_| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+        plugin.tab_store.tabs.insert(
+            1,
+            tab_state::TabState {
+                tab_id: 1,
+                position: 0,
+                name: "project".into(),
+                is_managed: true,
+            },
+        );
+        let mut pane = PaneState::new(
+            10,
+            1,
+            0,
+            Substitutions::default().program.get("nvim").cloned(),
+            None,
+        );
+        pane.cwd = Some("/home/user/project".into());
+        pane.short_dir = Some("project".into());
+        pane.screen_hash = Some(viewport_hash(&["same output".into()]));
+        plugin.pane_store.panes.insert(10, pane);
+
+        plugin.handle_event(Event::Timer(0.0));
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(plugin.poll_ticks, 0);
+        assert_eq!(pane.screen_state(), "stable");
+        assert_eq!(pane.screen_quiet_ticks, 1);
+    }
+
+    #[test]
+    fn test_poll_timer_skips_known_git_root() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_get_pane_running_command()
+            .with(eq(10u32))
+            .times(1)
+            .returning(|_| Ok(vec!["nvim".into()]));
+        mock.expect_get_pane_viewport()
+            .with(eq(10u32))
+            .times(1)
+            .returning(|_| Ok(vec!["same output".into()]));
+        mock.expect_set_timeout()
+            .with(eq(2.0))
+            .times(1)
+            .returning(|_| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+        plugin.tab_store.tabs.insert(
+            1,
+            tab_state::TabState {
+                tab_id: 1,
+                position: 0,
+                name: "project".into(),
+                is_managed: true,
+            },
+        );
+        let mut pane = PaneState::new(
+            10,
+            1,
+            0,
+            Substitutions::default().program.get("nvim").cloned(),
+            None,
+        );
+        pane.cwd = Some("/home/user/project".into());
+        pane.short_dir = Some("project".into());
+        pane.git_root = Some("/home/user/project".into());
+        pane.short_git_root = Some("project".into());
+        pane.screen_hash = Some(viewport_hash(&["same output".into()]));
+        plugin.pane_store.panes.insert(10, pane);
+
+        plugin.handle_event(Event::Timer(0.0));
+
+        assert_eq!(plugin.poll_ticks, 0);
     }
 
     #[test]

@@ -126,7 +126,7 @@ No automatic detection of manual renames — the user explicitly opts out via pi
 
 ## Debounce & Polling
 
-The timer fires at `debounce` interval (default 0.2s). Two mechanisms ride on it:
+The plugin schedules the next timer based on pending work: `debounce` (default 0.2s) while renames are pending, otherwise `poll_interval` (default 2s). Two mechanisms ride on it:
 
 1. **Rename debounce** — `pending_renames: HashSet<usize>` collects tab IDs. Each tick drains the set and renames all pending tabs. Multiple events within one tick coalesce.
 
