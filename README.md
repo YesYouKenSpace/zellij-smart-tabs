@@ -229,15 +229,20 @@ Programs can report their activity status to the plugin via pipe. The status is 
 
 ### Setting status
 
+Use the `status` pipe with payload `<pane_id> <status>` (space-separated):
+
 ```bash
 # From a program running inside a Zellij pane:
-zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PANE_ID'", "status": "running"}'
-zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PANE_ID'", "status": "done"}'
-zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PANE_ID'", "status": "error"}'
-zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PANE_ID'", "status": "idle"}'
+zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"
+zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID help"
+zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID ready"
+zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID error"
+zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID idle"
 ```
 
-Status is freeform - you can send any string. The [default status substitutions](#default-status-substitutions) are applied automatically. Custom statuses without a substitution are shown as-is.
+Status is freeform - you can send any string (e.g. `deploying`, `testing`). The [default status substitutions](#default-status-substitutions) are applied automatically. Custom statuses without a substitution are shown as-is.
+
+The older `pane_status` pipe with JSON payload (`{"pane_id":"...","status":"..."}`) is still supported for backward compatibility.
 
 ### Claude Code integration
 
@@ -251,31 +256,31 @@ Add this to your Claude Code settings (`.claude/settings.json` or global setting
     "UserPromptSubmit": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID busy\""]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID busy\""]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"busy\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID busy\""]
       }
     ],
     "Notification": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"help\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID help\""]
       }
     ],
     "Stop": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"ready\"}'"]
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID ready\""]
       }
     ]
   }

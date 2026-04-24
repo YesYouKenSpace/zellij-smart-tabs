@@ -43,6 +43,7 @@ const CMD_GIT_ROOT: &str = "git_root";
 const PIPE_SET_MANUAL: &str = "set_focused_to_manual";
 const PIPE_SET_MANAGED: &str = "set_focused_to_managed";
 const PIPE_PANE_STATUS: &str = "pane_status";
+const PIPE_STATUS: &str = "status";
 
 struct ZellijSmartTabsPlugin {
     host: Box<dyn ZellijHost>,
@@ -722,7 +723,48 @@ impl ZellijSmartTabsPlugin {
                 }
                 true
             }
+            PIPE_STATUS => {
+                if let Some(payload) = &message.payload {
+                    self.handle_status_pipe(payload);
+                }
+                true
+            }
             _ => false,
+        }
+    }
+
+    fn handle_status_pipe(&mut self, payload: &str) {
+        let mut parts = payload.trim().splitn(2, char::is_whitespace);
+        let pane_id_str = parts.next().unwrap_or("");
+        let status = parts.next().unwrap_or("").trim().to_string();
+
+        let pane_id: u32 = match pane_id_str.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                debug_log!(self, "status: invalid pane_id: {:?}", pane_id_str);
+                return;
+            }
+        };
+        if status.is_empty() {
+            debug_log!(self, "status: missing status value (payload: {:?})", payload);
+            return;
+        }
+
+        if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
+            if pane.status != status {
+                debug_log!(
+                    self,
+                    "pane {} status: {} -> {}",
+                    pane_id,
+                    pane.status,
+                    status
+                );
+                let tab_id = pane.tab_id;
+                pane.status = status;
+                self.schedule_rename(tab_id);
+            }
+        } else {
+            debug_log!(self, "status: pane {} not found", pane_id);
         }
     }
 }
