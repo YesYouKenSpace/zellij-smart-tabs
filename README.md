@@ -246,9 +246,30 @@ The older `pane_status` pipe with JSON payload (`{"pane_id":"...","status":"..."
 
 ### Claude Code integration
 
-Use [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to automatically update pane status when Claude starts and finishes work.
+The tab bar can automatically show three glanceable states for each Claude Code session:
 
-Add this to your Claude Code settings (`.claude/settings.json` or global settings):
+- `busy` — Claude is actively working (processing a prompt or running tools)
+- `help` — Claude sent a notification (permission request, question, or idle warning) and needs your attention
+- `ready` — Claude finished and is waiting for your next prompt
+
+#### Option A: Install as a Claude Code plugin (recommended)
+
+This repo ships its own Claude Code plugin manifest. Installing it auto-registers all the lifecycle hooks — no manual `settings.json` editing.
+
+In Claude Code:
+
+```
+/plugin marketplace add YesYouKenSpace/zellij-smart-tabs
+/plugin install zellij-smart-tabs@zellij-smart-tabs
+```
+
+That's it. Your `~/.claude/settings.json` only gains a single `enabledPlugins` entry; the hooks live in the plugin and register automatically when it's enabled. `/plugin uninstall` removes them cleanly — nothing lingers.
+
+If you haven't set up the Zellij-side plugin yet, run `/setup-zellij` from Claude Code to see the config snippet to add to `~/.config/zellij/config.kdl`.
+
+#### Option B: Manual hook setup
+
+If you prefer not to install the plugin (e.g. you're using these hooks outside Claude Code), add this to `.claude/settings.json`:
 
 ```json
 {
@@ -282,16 +303,16 @@ Add this to your Claude Code settings (`.claude/settings.json` or global setting
         "matcher": "",
         "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID ready\""]
       }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "",
+        "hooks": ["zellij pipe --plugin smart-tabs --name status -- \"$ZELLIJ_PANE_ID ready\""]
+      }
     ]
   }
 }
 ```
-
-This maps Claude's lifecycle to three glanceable states:
-
-- `busy` — Claude is actively working (processing a prompt or running tools)
-- `help` — Claude sent a notification (permission request, question, or idle warning) and needs your attention
-- `ready` — Claude finished and is waiting for your next prompt
 
 `$ZELLIJ_PANE_ID` is set automatically by Zellij for processes running inside panes.
 
