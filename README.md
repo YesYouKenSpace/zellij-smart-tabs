@@ -102,7 +102,7 @@ The `{{ program }}` template variable will show the substituted value. Programs 
 | `nvim` |  | `\u{e6ae}` |
 | `vim` |  | `\u{e7c5}` |
 | `claude` |  | `\u{f069}` |
-| `codex` | 󰒰 | `\u{f4b0}` |
+| `codex` | 󰒰 | `\u{eac4}` |
 | `node` | 󰎙 | `\u{f0399}` |
 | `zsh` |  | `\u{f489}` |
 | `go` | | `\u{e627}` |
