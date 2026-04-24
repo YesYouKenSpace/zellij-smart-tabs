@@ -494,6 +494,13 @@ impl ZellijSmartTabsPlugin {
                     debug_log!(self, "{} program -> {:?}", label, new_program);
                     changed_tabs.insert(pane.tab_id);
                     pane.program = new_program;
+                    // Status is tied to the running program. When the program
+                    // changes (agent exits, user spawns something else), reset
+                    // to idle so stale statuses don't linger.
+                    if pane.status != tab_state::DEFAULT_STATUS {
+                        debug_log!(self, "{} status reset (program changed)", label);
+                        pane.status = tab_state::DEFAULT_STATUS.to_string();
+                    }
                 }
             }
 
