@@ -316,6 +316,46 @@ If you prefer not to install the plugin (e.g. you're using these hooks outside C
 
 `$ZELLIJ_PANE_ID` is set automatically by Zellij for processes running inside panes.
 
+### Codex CLI integration
+
+OpenAI's Codex CLI has a hook system analogous to Claude Code's, behind the experimental `codex_hooks` feature flag. Unlike Claude Code, Codex plugins cannot ship hooks — they only bundle MCP servers, skills, and apps. So integration is a one-time manual append to `~/.codex/config.toml`.
+
+From Claude Code run `/setup-codex` to print the TOML snippet to paste. Or append this directly:
+
+```toml
+[features]
+codex_hooks = true
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
+
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID busy"'
+
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID help"'
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'zellij pipe --plugin smart-tabs --name status -- "$ZELLIJ_PANE_ID ready"'
+```
+
+`codex_hooks` is a feature flag in current Codex CLI source — it may change shape or stabilize under a different name in future versions. If Codex rejects the config, check the latest Codex release notes.
+
+`PermissionRequest` is Codex's equivalent of Claude's `Notification` — it fires when Codex asks for approval to run a command.
+
 For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
 
 ## Dashboard
