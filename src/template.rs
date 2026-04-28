@@ -1,5 +1,13 @@
 use minijinja::{Environment, Value};
 
+/// Validate that a format string compiles as a MiniJinja template.
+/// Returns `Err` with the parse error message if invalid.
+pub fn validate_format(format: &str) -> Result<(), String> {
+    let mut env = Environment::new();
+    env.add_template("_validate", format)
+        .map_err(|e| e.to_string())
+}
+
 /// Render a tab name from a format string and a context value.
 pub fn render(format: &str, context: &Value) -> String {
     let env = Environment::new();
