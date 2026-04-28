@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - feat: configurable skip_programs to skip wrapper commands (e.g. sudo) during program detection
 - feat: display terminal_command and running_command in Panes UI view
-- fix: default tab format template to show status with pipe separator
+- fix: remove stray pipe separator from default format when status is empty
+- feat: validate user format templates at config load, fall back to default with warning on parse error
 - security: Workflow does not contain permissions (#9)
 - fix: removed persistence code since it is not working yet (#8)
 
