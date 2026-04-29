@@ -567,13 +567,11 @@ impl ZellijSmartTabsPlugin {
             Mouse::ScrollDown(_) => {
                 self.scroll_offsets[self.active_view] += 3;
             }
-            Mouse::LeftClick(line, col) => {
-                if line == 0 {
-                    // Each tab label is roughly " N Name " ≈ 12 chars
-                    let approx_view = col / ui::APPROX_TAB_WIDTH;
-                    if approx_view < ui::VIEW_COUNT {
-                        self.active_view = approx_view;
-                    }
+            Mouse::LeftClick(0, col) => {
+                // Each tab label is roughly " N Name " ≈ 12 chars
+                let approx_view = col / ui::APPROX_TAB_WIDTH;
+                if approx_view < ui::VIEW_COUNT {
+                    self.active_view = approx_view;
                 }
             }
             _ => {}
