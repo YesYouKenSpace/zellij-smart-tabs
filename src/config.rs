@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-
-const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %} | {% if status %}{{ status }}{{% else %}} {% endif %}";
+// NOTE: Keep DEFAULT_FORMAT in sync with README.md § Format Gallery "Default" entry
+// and test_gallery_formats_render in this file.
+const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %}{% if status %} | {{ status }}{% endif %}";
 
 #[derive(Debug, Clone)]
 pub struct Substitutions {
@@ -39,6 +40,8 @@ const DEFAULT_SKIP_PROGRAMS: &[&str] = &["sudo"];
 
 pub struct Config {
     pub format: String,
+    /// Set when user-provided format failed to compile; contains the error message.
+    pub format_error: Option<String>,
     pub poll_interval: f64,
     pub debounce: f64,
     pub debug: bool,
@@ -48,10 +51,13 @@ pub struct Config {
 
 impl Config {
     pub fn from_map(map: &BTreeMap<String, String>) -> Self {
-        let format = map
-            .get("format")
-            .cloned()
-            .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
+        let (format, format_error) = match map.get("format") {
+            Some(user_fmt) => match crate::template::validate_format(user_fmt) {
+                Ok(()) => (user_fmt.clone(), None),
+                Err(e) => (DEFAULT_FORMAT.to_string(), Some(e)),
+            },
+            None => (DEFAULT_FORMAT.to_string(), None),
+        };
 
         let poll_interval = map
             .get("poll_interval")
@@ -89,6 +95,7 @@ impl Config {
 
         Self {
             format,
+            format_error,
             poll_interval,
             debounce,
             debug,
@@ -172,6 +179,22 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_format_falls_back_to_default() {
+        let c = config_with(&[("format", "{% if broken")]);
+        assert!(c.format_error.is_some());
+        assert!(
+            c.format.contains("short_git_root"),
+            "should fall back to DEFAULT_FORMAT"
+        );
+    }
+
+    #[test]
+    fn test_valid_format_no_error() {
+        let c = config_with(&[("format", "{{ short_dir }}")]);
+        assert!(c.format_error.is_none());
+    }
+
+    #[test]
     fn test_custom_format() {
         let c = config_with(&[("format", "{{ short_dir }}")]);
         assert_eq!(c.format, "{{ short_dir }}");
@@ -246,6 +269,77 @@ mod tests {
         assert!(c.skip_programs.contains("sudo")); // default preserved
         assert!(c.skip_programs.contains("doas"));
         assert!(c.skip_programs.contains("nohup"));
+    }
+
+    /// Verify that all format strings from the README.md "Format Gallery" section
+    /// parse and render correctly. If you add or change a format in the gallery,
+    /// update this test to match.
+    #[test]
+    fn test_gallery_formats_render() {
+        use crate::template::render;
+        use minijinja::{context, Value};
+
+        let ctx = context! {
+            short_dir => "my-project",
+            short_git_root => "my-repo",
+            cwd => "/home/user/Projects/my-project",
+            program => "nvim",
+            status => "idle",
+            pane => vec![
+                serde_json::json!({"short_dir": "my-project", "program": "nvim"}),
+                serde_json::json!({"short_dir": "docs"}),
+            ],
+        };
+        let ctx_val = Value::from_serialize(&ctx);
+
+        let c = Config::from_map(&BTreeMap::new());
+
+        // NOTE: KEEP IN SYNC with README.md § Format Gallery.
+        let gallery = [
+            // Default (also DEFAULT_FORMAT)
+            (c.format.as_str(), "my-repo"),
+            // Minimal
+            ("{{ short_dir }}", "my-project"),
+            // Full path
+            ("{{ cwd }}", "/home/user/Projects/my-project"),
+            // Program-first
+            ("{% if program %}{{ program }} @ {% endif %}{{ short_dir }}", "nvim @ my-project"),
+            // Status indicators
+            ("{{ short_dir }}{% if status %} {{ status }}{% endif %}{% if program %} {{ program }}{% endif %}", "my-project"),
+            // Bracketed program
+            ("{{ short_dir }}{% if program %} [{{ program }}]{% endif %}", "my-project [nvim]"),
+            // Multi-pane
+            ("{{ short_dir }}{% if pane[1] %} | {{ pane[1].short_dir }}{% endif %}", "my-project | docs"),
+        ];
+
+        for (format, expected_substr) in &gallery {
+            let result = render(format, &ctx_val);
+            assert!(
+                !result.is_empty(),
+                "gallery format {:?} should render non-empty",
+                format
+            );
+            assert!(
+                result.contains(expected_substr),
+                "gallery format {:?} rendered {:?}, expected to contain {:?}",
+                format,
+                result,
+                expected_substr
+            );
+        }
+
+        // Default format should also fallback to short_dir when git root is absent
+        let ctx_no_git = context! { short_dir => "fallback-dir" };
+        let result = render(&c.format, &Value::from_serialize(&ctx_no_git));
+        assert!(
+            !result.is_empty(),
+            "default format should render without git root"
+        );
+        assert!(
+            result.contains("fallback-dir"),
+            "should fallback to short_dir: {}",
+            result
+        );
     }
 
     #[test]
