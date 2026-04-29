@@ -15,9 +15,6 @@ build-dev:
 dev: clean-cache build-dev
 	zellij -n dev-layout.kdl --session smart-tabs-dev
 
-dev-reload: clean-cache build-dev
-	zellij kill-session smart-tabs-dev 2>/dev/null; sleep 0.5; zellij -n dev-layout.kdl --session smart-tabs-dev
-
 test:
 	cargo test --target $$(rustc -vV | grep host | awk '{print $$2}')
 
