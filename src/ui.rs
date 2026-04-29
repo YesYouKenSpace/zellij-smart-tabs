@@ -137,15 +137,18 @@ fn render_panes(
     all_tabs.sort_by_key(|t| t.position);
 
     let mut table = Table::new().add_row(vec![
-        "Tab", "Pos", "CWD", "Git Root", "Program", "Terminal Cmd", "Running Cmd", "Status",
+        "ID", "Tab", "Pos", "CWD", "Git Root", "Program", "Terminal Cmd", "Running Cmd", "Status",
     ]);
 
     for tab in &all_tabs {
         let panes = pane_store.panes_for_tab(tab.tab_id);
+        let tab_idx = tab.position.to_string();
         for p in &panes {
+            let id = p.pane_id.to_string();
             let pos = p.position.to_string();
             table = table.add_row(vec![
-                nonempty(tab.name.as_str()),
+                id.as_str(),
+                tab_idx.as_str(),
                 pos.as_str(),
                 nonempty(p.short_dir.as_deref().unwrap_or("-")),
                 nonempty(p.short_git_root.as_deref().unwrap_or("-")),

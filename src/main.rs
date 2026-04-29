@@ -1,5 +1,6 @@
 mod config;
 mod host;
+
 mod tab_state;
 mod template;
 mod ui;
@@ -207,6 +208,8 @@ impl ZellijSmartTabsPlugin {
 
         minijinja::Value::from_serialize(&ctx)
     }
+
+
 
     fn rename_tab_for(&mut self, tab_id: usize) {
         let state = match self.tab_store.tabs.get(&tab_id) {
@@ -1058,4 +1061,5 @@ mod tests {
         assert!(parse_semver("0.43.0").unwrap() < MIN_ZELLIJ_VERSION);
         assert!(parse_semver("0.43.9").unwrap() < MIN_ZELLIJ_VERSION);
     }
+
 }
