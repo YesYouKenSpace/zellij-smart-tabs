@@ -127,8 +127,20 @@ impl ZellijSmartTabsPlugin {
         })
     }
 
+    fn warn_format_error(&mut self) {
+        if let Some(err) = &self.config().format_error {
+            let msg = format!("[WARN] invalid format template, using default: {}", err);
+            eprintln!("[smart-tabs] {}", msg);
+            self.log_buffer.push_back(msg);
+            if self.log_buffer.len() > MAX_LOG_ENTRIES {
+                self.log_buffer.pop_front();
+            }
+        }
+    }
+
     fn initialize(&mut self, configuration: BTreeMap<String, String>) {
         self.config = Some(Config::from_map(&configuration));
+        self.warn_format_error();
         debug_log!(
             self,
             "initialized: format={:?} poll={}s",
@@ -254,10 +266,6 @@ impl ZellijSmartTabsPlugin {
 
         let needs_rename = self.tab_store.sync_tabs(&tab_infos);
 
-        for &tab_id in &needs_rename {
-            debug_log!(self, "new tab {}", tab_id);
-        }
-
         self.pane_store
             .panes
             .retain(|_, p| self.tab_store.tabs.contains_key(&p.tab_id));
@@ -295,7 +303,9 @@ impl ZellijSmartTabsPlugin {
                 // For regular terminal panes, program is polled via get_pane_running_command in the timer.
                 let is_command_pane = pane.terminal_command.is_some();
                 let program = if is_command_pane {
-                    let tokens: Vec<&str> = pane.terminal_command.as_deref()
+                    let tokens: Vec<&str> = pane
+                        .terminal_command
+                        .as_deref()
                         .map(|s| s.split_whitespace().collect())
                         .unwrap_or_default();
                     self.substitute_program(extract_program(&tokens, &self.config().skip_programs))
@@ -475,16 +485,12 @@ impl ZellijSmartTabsPlugin {
             .map(|(&id, _)| id)
             .collect();
         for pane_id in pane_ids {
-            let raw_cmd = self
-                .host
-                .get_pane_running_command(pane_id)
-                .ok();
+            let raw_cmd = self.host.get_pane_running_command(pane_id).ok();
             let running_command = raw_cmd.as_ref().map(|cmd| cmd.join(" "));
-            let raw_program = raw_cmd
-                .and_then(|cmd| {
-                    let tokens: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
-                    extract_program(&tokens, &self.config().skip_programs)
-                });
+            let raw_program = raw_cmd.and_then(|cmd| {
+                let tokens: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+                extract_program(&tokens, &self.config().skip_programs)
+            });
             let new_program = self.substitute_program(raw_program);
             let label = pane_label(&self.pane_store, pane_id);
             if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
@@ -561,13 +567,11 @@ impl ZellijSmartTabsPlugin {
             Mouse::ScrollDown(_) => {
                 self.scroll_offsets[self.active_view] += 3;
             }
-            Mouse::LeftClick(line, col) => {
-                if line == 0 {
-                    // Each tab label is roughly " N Name " ≈ 12 chars
-                    let approx_view = col / ui::APPROX_TAB_WIDTH;
-                    if approx_view < ui::VIEW_COUNT {
-                        self.active_view = approx_view;
-                    }
+            Mouse::LeftClick(0, col) => {
+                // Each tab label is roughly " N Name " ≈ 12 chars
+                let approx_view = col / ui::APPROX_TAB_WIDTH;
+                if approx_view < ui::VIEW_COUNT {
+                    self.active_view = approx_view;
                 }
             }
             _ => {}
@@ -627,6 +631,7 @@ impl ZellijSmartTabsPlugin {
             Event::PluginConfigurationChanged(configuration) => {
                 debug_log!(self, "config reloaded");
                 self.config = Some(Config::from_map(&configuration));
+                self.warn_format_error();
                 if self.permissions_granted {
                     self.schedule_rename_all();
                 }

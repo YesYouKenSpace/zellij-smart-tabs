@@ -1,15 +1,15 @@
 # zellij-smart-tabs
 
-https://github.com/user-attachments/assets/e9ce05ce-677d-41ff-9707-7946323cac20
+<https://github.com/user-attachments/assets/e9ce05ce-677d-41ff-9707-7946323cac20>
 
-A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to. 
-
+A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to.
 
 ## Objective
 
 I built this because I kept losing track of which tab was which. I wanted to glance at my tab bar and instantly know what's running where - without manually renaming tabs every time I switch projects or start a new tool. Now my tabs just tell me what I need to know.
 
 ## Features
+
 - **Smart renaming** - auto-renames tabs based on configurable Jinja2-like templates (powered by MiniJinja) with context-aware variables (`short_dir`, `short_git_root`, `program`)
 - **Pane-scoped templates** - reference specific panes in templates (`pane[0].*`, `pane[-1].*`) powered by MiniJinja
 - **Manual tab control** - toggle a tab to manual mode to prevent auto-renaming, then rename it yourself. Clear the tab name to restore auto-management.
@@ -30,6 +30,7 @@ cp zellij-smart-tabs.wasm ~/.config/zellij/plugins/
 ### Build from source
 
 Requires Rust with the `wasm32-wasip1` target:
+
 ```bash
 rustup target add wasm32-wasip1
 ```
@@ -42,12 +43,14 @@ make install
 ```
 
 ### Prerequisites
+
 - **[Zellij](https://zellij.dev/) 0.44.0+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0
 - **[Nerd Font](https://www.nerdfonts.com/)** - the default substitutions use Nerd Font icons. Install one from [nerdfonts.com](https://www.nerdfonts.com/font-downloads) and configure your terminal to use it. Without a Nerd Font, icons will appear as missing glyphs.
 
 ## Quickstart
 
 Alias the plugin and load the plugin on startup. Replace `v0.1.0` with the latest version
+
 ```kdl
 plugins {
     smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.1.0/zellij-smart-tabs.wasm" {
@@ -71,7 +74,6 @@ All configuration is inline in the plugin block.
 | `debounce` | Number (seconds) | `0.2` | Delay before applying tab rename after data changes |
 | `debug` | Bool | `true` | Enable debug logging to Zellij log |
 | `sub` | Block | - | Substitution rules (see below) |
-
 
 ### Substitutions
 
@@ -138,12 +140,13 @@ Top-level variables (e.g., `{{ short_dir }}`) are aliases for `pane[0].*` (first
 
 ### Format Gallery
 
+<!-- NOTE: KEEP IN SYNC with tests in src/config.rs -->
 A collection of format strings for different workflows. Copy one into your plugin config:
 
 ```kdl
 // Default - IDE-style: project + file context + status
-format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} \u{eab6} {{ program }}{% endif %}{% if status %} {{ status }}{% endif %}"
-// => my-repo › nvim ✅
+format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} \u{eab6} {{ program }}{% endif %}{% if status %} | {{ status }}{% endif %}"
+// => my-repo › nvim | ✅
 
 // Minimal - just the directory name
 format "{{ short_dir }}"
@@ -178,6 +181,7 @@ By default, all tabs are auto-managed - the plugin renames them based on your fo
 ### Set tab to manual
 
 Run from any terminal pane:
+
 ```bash
 zellij pipe --name set_focused_to_manual --plugin smart-tabs
 ```
@@ -187,6 +191,7 @@ This sets the focused tab to manual mode. Manual tabs are skipped by auto-rename
 ### Recommended keybinding
 
 Add this to your Zellij config (`~/.config/zellij/config.kdl`) to override the `r` key in tab mode and the `esc` key in renametab mode.
+
 ```kdl
 keybinds {
     tab {
@@ -215,6 +220,7 @@ keybinds {
 ### Restore auto-management
 
 Three ways to restore a manual tab to auto-management:
+
 1. **Pipe command** - run `zellij pipe --name set_focused_to_managed --plugin smart-tabs`
 2. **Clear the tab name** - rename the tab to an empty string (the plugin detects this and switches back to managed)
 3. **Esc in rename mode** - if using the recommended keybinding above, pressing `Esc` cancels the rename and restores managed mode
@@ -297,7 +303,6 @@ The plugin pane shows a tabbed dashboard with keyboard and mouse navigation.
 | `Esc` | Hide plugin pane |
 
 Mouse click on the tab bar switches views. Mouse scroll works within views.
-
 
 ## Alternatives
 
