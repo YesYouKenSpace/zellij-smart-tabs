@@ -15,28 +15,28 @@ fn nonempty(s: &str) -> &str {
 pub const APPROX_TAB_WIDTH: usize = 12;
 const VIEW_NAMES: [&str; VIEW_COUNT] = ["Status", "Tabs", "Panes", "Help"];
 
-pub fn render_dashboard(
-    rows: usize,
-    cols: usize,
-    active_view: usize,
-    scroll_offsets: &[usize; VIEW_COUNT],
-    config: &Config,
-    tab_store: &TabStore,
-    pane_store: &PaneStore,
-    last_rename: &Option<String>,
-) {
+pub struct DashboardContext<'a> {
+    pub active_view: usize,
+    pub scroll_offsets: &'a [usize; VIEW_COUNT],
+    pub config: &'a Config,
+    pub tab_store: &'a TabStore,
+    pub pane_store: &'a PaneStore,
+    pub last_rename: &'a Option<String>,
+}
+
+pub fn render_dashboard(rows: usize, cols: usize, ctx: &DashboardContext) {
     if rows < 3 || cols < 10 {
         return;
     }
-    render_tab_bar(active_view);
+    render_tab_bar(ctx.active_view);
     let content_rows = rows.saturating_sub(2);
-    let scroll = scroll_offsets[active_view];
+    let scroll = ctx.scroll_offsets[ctx.active_view];
 
-    match active_view {
-        0 => render_status(content_rows, cols, config),
-        1 => render_tabs(content_rows, cols, tab_store, pane_store, last_rename),
-        2 => render_panes(content_rows, cols, tab_store, pane_store),
-        3 => render_help(content_rows, cols, scroll, config),
+    match ctx.active_view {
+        0 => render_status(content_rows, cols, ctx.config),
+        1 => render_tabs(content_rows, cols, ctx.tab_store, ctx.pane_store, ctx.last_rename),
+        2 => render_panes(content_rows, cols, ctx.tab_store, ctx.pane_store),
+        3 => render_help(content_rows, cols, scroll, ctx.config),
         _ => {}
     }
 
