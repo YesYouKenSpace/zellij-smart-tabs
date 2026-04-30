@@ -1,18 +1,20 @@
 use crate::config::Config;
 use crate::tab_state::{PaneStore, TabStore};
-use std::collections::VecDeque;
 use zellij_tile::prelude::*;
 
-pub const VIEW_COUNT: usize = 5;
+pub const VIEW_COUNT: usize = 4;
 
 fn nonempty(s: &str) -> &str {
-    if s.is_empty() { " " } else { s }
+    if s.is_empty() {
+        " "
+    } else {
+        s
+    }
 }
 
 pub const APPROX_TAB_WIDTH: usize = 12;
-const VIEW_NAMES: [&str; VIEW_COUNT] = ["Status", "Tabs", "Panes", "Log", "Help"];
+const VIEW_NAMES: [&str; VIEW_COUNT] = ["Status", "Tabs", "Panes", "Help"];
 
-#[allow(clippy::too_many_arguments)]
 pub fn render_dashboard(
     rows: usize,
     cols: usize,
@@ -21,7 +23,6 @@ pub fn render_dashboard(
     config: &Config,
     tab_store: &TabStore,
     pane_store: &PaneStore,
-    log_buffer: &VecDeque<String>,
     last_rename: &Option<String>,
 ) {
     if rows < 3 || cols < 10 {
@@ -35,8 +36,7 @@ pub fn render_dashboard(
         0 => render_status(content_rows, cols, config),
         1 => render_tabs(content_rows, cols, tab_store, pane_store, last_rename),
         2 => render_panes(content_rows, cols, tab_store, pane_store),
-        3 => render_log(content_rows, cols, scroll, log_buffer),
-        4 => render_help(content_rows, cols, scroll, config),
+        3 => render_help(content_rows, cols, scroll, config),
         _ => {}
     }
 
@@ -65,7 +65,7 @@ fn render_tab_bar(active_view: usize) {
 fn render_status(rows: usize, cols: usize, config: &Config) {
     let lines = [
         format!("zellij-smart-tabs v{}", env!("CARGO_PKG_VERSION")),
-        String::new(),
+        " ".to_string(),
         format!("Format:     {}", config.format),
         format!("Poll:       {}s", config.poll_interval),
         format!("Debug:      {}", if config.debug { "on" } else { "off" }),
@@ -127,17 +127,21 @@ fn render_tabs(
     };
 }
 
-fn render_panes(
-    rows: usize,
-    cols: usize,
-    tab_store: &TabStore,
-    pane_store: &PaneStore,
-) {
+fn render_panes(rows: usize, cols: usize, tab_store: &TabStore, pane_store: &PaneStore) {
     let mut all_tabs: Vec<_> = tab_store.tabs.values().collect();
     all_tabs.sort_by_key(|t| t.position);
 
     let mut table = Table::new().add_row(vec![
-        "ID", "Tab", "Pos", "CWD", "Git Root", "Program", "Terminal Cmd", "Running Cmd", "Status",
+        "ID",
+        "Tab",
+        "Pos",
+        "CWD",
+        "Git Root",
+        "Program",
+        "Terminal Cmd",
+        "Running Cmd",
+        "Status",
+        "On Focus",
     ]);
 
     for tab in &all_tabs {
@@ -156,32 +160,12 @@ fn render_panes(
                 nonempty(p.terminal_command.as_deref().unwrap_or("-")),
                 nonempty(p.running_command.as_deref().unwrap_or("-")),
                 nonempty(p.status.as_str()),
+                nonempty(p.on_focus.as_deref().unwrap_or("-")),
             ]);
         }
     }
 
     print_table_with_coordinates(table, 0, 1, Some(cols), Some(rows));
-}
-
-fn render_log(rows: usize, cols: usize, scroll: usize, log_buffer: &VecDeque<String>) {
-    if log_buffer.is_empty() {
-        print_text_with_coordinates(
-            Text::new("No log entries. Enable debug=\"true\" in plugin config.").dim_all(),
-            0,
-            1,
-            Some(cols),
-            None,
-        );
-        return;
-    }
-
-    let total = log_buffer.len();
-    let end = total.saturating_sub(scroll);
-    let start = end.saturating_sub(rows);
-
-    for (i, entry) in log_buffer.iter().skip(start).take(end - start).enumerate() {
-        print_text_with_coordinates(Text::new(entry), 0, 1 + i, Some(cols), None);
-    }
 }
 
 fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
@@ -200,12 +184,12 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
         "  {{ short_git_root }}  Last component of git root",
     ));
     lines.push(Text::new("  {{ program }}         Running program name"));
-    lines.push(Text::new(""));
+    lines.push(Text::new(" "));
     lines.push(Text::new("Pane-scoped access:").dim_all());
     lines.push(Text::new("  {{ pane.last.program }}         Last pane"));
     lines.push(Text::new("  {{ pane['0'].short_dir }}       First pane"));
     lines.push(Text::new("  {{ pane['1'].short_dir }}       Second pane"));
-    lines.push(Text::new(""));
+    lines.push(Text::new(" "));
     lines.push(Text::new("Keyboard Shortcuts").color_all(0));
     lines.push(Text::new("  1-5         Switch view"));
     lines.push(Text::new("  Tab         Next view"));
@@ -214,7 +198,7 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
     lines.push(Text::new("  g           Scroll to top"));
     lines.push(Text::new("  G           Scroll to bottom"));
     lines.push(Text::new("  Esc         Hide plugin pane"));
-    lines.push(Text::new(""));
+    lines.push(Text::new(" "));
     lines.push(Text::new("Config Reference").color_all(0));
     lines.push(Text::new(format!(
         "  format:        Tab name template (current: {})",
@@ -228,7 +212,6 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
         "  debug:         Enable debug logging (current: {})",
         config.debug
     )));
-
     for (i, line) in lines.iter().skip(scroll).take(rows).enumerate() {
         print_text_with_coordinates(line.clone(), 0, 1 + i, Some(cols), None);
     }
@@ -262,6 +245,9 @@ fn render_shortcuts(rows: usize, cols: usize) {
     let shortcuts = "1-5:View  Tab:Next  j/k:Scroll  g/G:Top/Bot  Esc:Hide";
     print_text_with_coordinates(
         Text::new(shortcuts).dim_all(),
-        0, rows.saturating_sub(1), Some(cols), None,
+        0,
+        rows.saturating_sub(1),
+        Some(cols),
+        None,
     );
 }
