@@ -20,6 +20,7 @@ pub struct PaneState {
     /// Raw output from `get_pane_running_command` for non-command panes.
     pub running_command: Option<String>,
     pub status: String,
+    pub on_focus: Option<String>,
 }
 
 impl PaneState {
@@ -119,7 +120,8 @@ impl TabStore {
 
     /// Find tab_id by tab position.
     pub fn tab_id_at_position(&self, position: usize) -> Option<usize> {
-        self.tabs.values()
+        self.tabs
+            .values()
             .find(|t| t.position == position)
             .map(|t| t.tab_id)
     }
@@ -132,9 +134,7 @@ mod tests {
     #[test]
     fn test_new_tabs_need_renaming() {
         let mut store = TabStore::default();
-        let needs = store.sync_tabs(
-            &[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())],
-        );
+        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())]);
         assert_eq!(needs.len(), 2);
     }
 
@@ -184,16 +184,40 @@ mod tests {
     #[test]
     fn test_pane_store_queries() {
         let mut pane_store = PaneStore::default();
-        pane_store.panes.insert(10, PaneState {
-            pane_id: 10, tab_id: 1, position: 0,
-            cwd: Some("/home/user/a".into()), short_dir: Some("a".into()),
-            git_root: None, short_git_root: None, program: Some("nvim".into()), terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        });
-        pane_store.panes.insert(11, PaneState {
-            pane_id: 11, tab_id: 1, position: 1,
-            cwd: Some("/home/user/b".into()), short_dir: Some("b".into()),
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
-        });
+        pane_store.panes.insert(
+            10,
+            PaneState {
+                pane_id: 10,
+                tab_id: 1,
+                position: 0,
+                cwd: Some("/home/user/a".into()),
+                short_dir: Some("a".into()),
+                git_root: None,
+                short_git_root: None,
+                program: Some("nvim".into()),
+                terminal_command: None,
+                running_command: None,
+                status: DEFAULT_STATUS.to_string(),
+                on_focus: None,
+            },
+        );
+        pane_store.panes.insert(
+            11,
+            PaneState {
+                pane_id: 11,
+                tab_id: 1,
+                position: 1,
+                cwd: Some("/home/user/b".into()),
+                short_dir: Some("b".into()),
+                git_root: None,
+                short_git_root: None,
+                program: None,
+                terminal_command: None,
+                running_command: None,
+                status: DEFAULT_STATUS.to_string(),
+                on_focus: None,
+            },
+        );
 
         let tab1_panes = pane_store.panes_for_tab(1);
         assert_eq!(tab1_panes.len(), 2);
@@ -205,9 +229,18 @@ mod tests {
     #[test]
     fn test_pane_set_cwd_updates_short_dir() {
         let mut pane = PaneState {
-            pane_id: 1, tab_id: 1, position: 0,
-            cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
+            pane_id: 1,
+            tab_id: 1,
+            position: 0,
+            cwd: None,
+            short_dir: None,
+            git_root: None,
+            short_git_root: None,
+            program: None,
+            terminal_command: None,
+            running_command: None,
+            status: DEFAULT_STATUS.to_string(),
+            on_focus: None,
         };
         pane.set_cwd("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_dir, Some("my-project".into()));
@@ -216,9 +249,18 @@ mod tests {
     #[test]
     fn test_pane_set_git_root_updates_short() {
         let mut pane = PaneState {
-            pane_id: 1, tab_id: 1, position: 0,
-            cwd: None, short_dir: None,
-            git_root: None, short_git_root: None, program: None, terminal_command: None, running_command: None, status: DEFAULT_STATUS.to_string(),
+            pane_id: 1,
+            tab_id: 1,
+            position: 0,
+            cwd: None,
+            short_dir: None,
+            git_root: None,
+            short_git_root: None,
+            program: None,
+            terminal_command: None,
+            running_command: None,
+            status: DEFAULT_STATUS.to_string(),
+            on_focus: None,
         };
         pane.set_git_root("/home/user/Projects/my-project".into());
         assert_eq!(pane.short_git_root, Some("my-project".into()));

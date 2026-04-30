@@ -165,7 +165,6 @@ mod tests {
         assert!(c.format.contains("short_dir"));
         assert_eq!(c.poll_interval, 5.0);
         assert_eq!(c.debounce, 0.2);
-        assert!(!c.debug);
         // Default substitutions are populated
         let defaults = Substitutions::default();
         assert_eq!(
@@ -205,11 +204,9 @@ mod tests {
         let c = config_with(&[
             ("format", "{{ short_dir }} ({{ short_git_root }})"),
             ("poll_interval", "10"),
-            ("debug", "true"),
         ]);
         assert_eq!(c.format, "{{ short_dir }} ({{ short_git_root }})");
         assert_eq!(c.poll_interval, 10.0);
-        assert!(c.debug);
     }
 
     #[test]

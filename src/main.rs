@@ -1,42 +1,22 @@
 mod config;
 mod host;
-
+mod logging;
 mod tab_state;
 mod template;
 mod ui;
 mod utils;
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet};
 use zellij_tile::prelude::*;
 
 use config::Config;
 #[cfg(not(test))]
 use host::RealZellijHost;
 use host::ZellijHost;
+
+use log::{debug, error, warn};
 use tab_state::{PaneState, PaneStore, TabStore};
 use utils::{extract_program, parse_git_root};
-
-const MAX_LOG_ENTRIES: usize = 100;
-
-macro_rules! debug_log {
-    ($self:expr, $($arg:tt)*) => {
-        if $self.config.as_ref().map_or(false, |c| c.debug) {
-            let msg = format!($($arg)*);
-            eprintln!("[smart-tabs] {}", msg);
-            $self.log_buffer.push_back(msg);
-            if $self.log_buffer.len() > MAX_LOG_ENTRIES {
-                $self.log_buffer.pop_front();
-            }
-        }
-    };
-}
-
-fn pane_label(pane_store: &PaneStore, pane_id: u32) -> String {
-    match pane_store.panes.get(&pane_id) {
-        Some(p) => format!("pane {} of tab {}", p.position, p.tab_id),
-        None => format!("pane ?{}", pane_id),
-    }
-}
 
 const CTX_PANE_ID: &str = "pane_id";
 const CTX_COMMAND_TYPE: &str = "command_type";
@@ -58,8 +38,7 @@ struct ZellijSmartTabsPlugin {
     /// a full poll cycle runs (refresh CWD, git, program).
     poll_ticks: u32,
     active_view: usize,
-    scroll_offsets: [usize; 5],
-    log_buffer: VecDeque<String>,
+    scroll_offsets: [usize; ui::VIEW_COUNT],
     last_rename: Option<String>,
     version_error: Option<String>,
 }
@@ -76,8 +55,7 @@ impl Default for ZellijSmartTabsPlugin {
             pending_renames: HashSet::new(),
             poll_ticks: 0,
             active_view: 0,
-            scroll_offsets: [0; 5],
-            log_buffer: VecDeque::new(),
+            scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
         }
@@ -128,26 +106,18 @@ impl ZellijSmartTabsPlugin {
         })
     }
 
-    fn warn_format_error(&mut self) {
+    fn warn_format_error(&self) {
         if let Some(err) = &self.config().format_error {
-            let msg = format!("[WARN] invalid format template, using default: {}", err);
-            eprintln!("[smart-tabs] {}", msg);
-            self.log_buffer.push_back(msg);
-            if self.log_buffer.len() > MAX_LOG_ENTRIES {
-                self.log_buffer.pop_front();
-            }
+            warn!(err = err.as_str(); "invalid format template, using default");
         }
     }
 
     fn initialize(&mut self, configuration: BTreeMap<String, String>) {
         self.config = Some(Config::from_map(&configuration));
+        logging::init();
+        logging::set_debug(self.config().debug);
         self.warn_format_error();
-        debug_log!(
-            self,
-            "initialized: format={:?} poll={}s",
-            self.config().format,
-            self.config().poll_interval
-        );
+        debug!(format = self.config().format.as_str(), poll_interval = self.config().poll_interval; "initialized");
     }
 
     fn config(&self) -> &Config {
@@ -228,7 +198,7 @@ impl ZellijSmartTabsPlugin {
         let ctx = self.build_template_context(tab_id);
         let name = template::render(&self.config().format, &ctx);
         if !name.is_empty() && state.name != name {
-            debug_log!(self, "rename tab {} -> {:?}", tab_id, name);
+            debug!(tab_id = tab_id, name = name.as_str(); "rename tab");
             self.host.rename_tab(tab_id as u64, name.clone());
             self.last_rename = Some(format!("tab {} -> {:?}", tab_id, name));
             if let Some(state) = self.tab_store.tabs.get_mut(&tab_id) {
@@ -238,7 +208,11 @@ impl ZellijSmartTabsPlugin {
     }
 
     fn schedule_rename(&mut self, tab_id: usize) {
+        let was_empty = self.pending_renames.is_empty();
         self.pending_renames.insert(tab_id);
+        if was_empty && self.permissions_granted {
+            self.host.set_timeout(self.config().debounce);
+        }
     }
 
     fn schedule_rename_all(&mut self) {
@@ -334,6 +308,14 @@ impl ZellijSmartTabsPlugin {
                         existing.program = program;
                         changed = true;
                     }
+                    // Apply on_focus_status when pane gains focus (one-shot: take clears it)
+                    if pane.is_focused {
+                        if let Some(new_status) = existing.on_focus.take() {
+                            debug!(pane_id = pane.id, from = existing.status.as_str(), to = new_status.as_str(); "on_focus applied");
+                            existing.status = new_status;
+                            changed = true;
+                        }
+                    }
                     if changed {
                         changed_tabs.insert(tab.tab_id);
                     }
@@ -352,6 +334,7 @@ impl ZellijSmartTabsPlugin {
                             terminal_command: pane.terminal_command.clone(),
                             running_command: None,
                             status: tab_state::DEFAULT_STATUS.to_string(),
+                            on_focus: None,
                         },
                     );
                     changed_tabs.insert(tab.tab_id);
@@ -374,10 +357,9 @@ impl ZellijSmartTabsPlugin {
             None => return,
         };
 
-        let label = pane_label(&self.pane_store, pane_id);
         let changed = if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
             if pane.cwd.as_ref() != Some(&cwd_str) {
-                debug_log!(self, "{} cwd -> {:?}", label, cwd_str);
+                debug!(pane_id = pane_id, tab_id = tab_id, cwd = cwd_str.as_str(); "cwd changed");
                 pane.set_cwd(cwd_str.clone());
                 self.request_git_info(pane_id, &cwd_str);
                 true
@@ -415,14 +397,13 @@ impl ZellijSmartTabsPlugin {
             None => return,
         };
 
-        let label = pane_label(&self.pane_store, pane_id);
         let changed = if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
             match cmd_type {
                 CMD_GIT_ROOT => {
                     if success {
                         if let Some(root) = parse_git_root(&stdout) {
                             if pane.git_root.as_ref() != Some(&root) {
-                                debug_log!(self, "{} git_root -> {:?}", label, root);
+                                debug!(pane_id = pane_id, tab_id = tab_id, git_root = root.as_str(); "git_root changed");
                                 pane.set_git_root(root);
                                 true
                             } else {
@@ -432,7 +413,7 @@ impl ZellijSmartTabsPlugin {
                             false
                         }
                     } else if pane.git_root.is_some() {
-                        debug_log!(self, "{} git_root cleared", label);
+                        debug!(pane_id = pane_id, tab_id = tab_id; "git_root cleared");
                         pane.clear_git();
                         true
                     } else {
@@ -461,13 +442,12 @@ impl ZellijSmartTabsPlugin {
             .map(|(&id, _)| id)
             .collect();
         for pane_id in panes_missing_cwd {
-            let label = pane_label(&self.pane_store, pane_id);
             if let Ok(cwd) = self.host.get_pane_cwd(pane_id) {
                 let cwd_str = cwd.to_string_lossy().to_string();
                 if !cwd_str.is_empty() {
                     let tab_id = self.pane_store.panes.get(&pane_id).map(|p| p.tab_id);
                     if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
-                        debug_log!(self, "{} cwd -> {:?}", label, cwd_str);
+                        debug!(pane_id = pane_id, cwd = cwd_str.as_str(); "cwd polled");
                         pane.set_cwd(cwd_str.clone());
                     }
                     if let Some(tab_id) = tab_id {
@@ -495,11 +475,10 @@ impl ZellijSmartTabsPlugin {
                 extract_program(&tokens, &self.config().skip_programs)
             });
             let new_program = self.substitute_program(raw_program);
-            let label = pane_label(&self.pane_store, pane_id);
             if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
                 pane.running_command = running_command;
                 if pane.program != new_program {
-                    debug_log!(self, "{} program -> {:?}", label, new_program);
+                    debug!(pane_id = pane_id, program = format!("{:?}", new_program).as_str(); "program changed");
                     changed_tabs.insert(pane.tab_id);
                     pane.program = new_program;
                 }
@@ -534,7 +513,6 @@ impl ZellijSmartTabsPlugin {
                 BareKey::Char('2') => self.active_view = 1,
                 BareKey::Char('3') => self.active_view = 2,
                 BareKey::Char('4') => self.active_view = 3,
-                BareKey::Char('5') => self.active_view = 4,
                 BareKey::Tab => {
                     self.active_view = (self.active_view + 1) % ui::VIEW_COUNT;
                 }
@@ -592,7 +570,7 @@ impl ZellijSmartTabsPlugin {
         }
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
-                debug_log!(self, "permissions granted");
+                debug!("permissions granted");
                 self.permissions_granted = true;
                 self.host.hide_self();
                 self.schedule_rename_all();
@@ -632,8 +610,9 @@ impl ZellijSmartTabsPlugin {
                 true
             }
             Event::PluginConfigurationChanged(configuration) => {
-                debug_log!(self, "config reloaded");
                 self.config = Some(Config::from_map(&configuration));
+                logging::set_debug(self.config().debug);
+                debug!("config reloaded");
                 self.warn_format_error();
                 if self.permissions_granted {
                     self.schedule_rename_all();
@@ -658,7 +637,7 @@ impl ZellijSmartTabsPlugin {
                 if let Some(state) = self.tab_store.tabs.get_mut(&tab_id) {
                     if state.is_managed != managed {
                         state.is_managed = managed;
-                        debug_log!(self, "tab {} managed={}", tab_id, managed);
+                        debug!(tab_id = tab_id, managed = managed; "tab management changed");
                         if managed {
                             self.schedule_rename(tab_id);
                         }
@@ -673,12 +652,13 @@ impl ZellijSmartTabsPlugin {
         struct StatusPayload {
             pane_id: String,
             status: String,
+            on_focus: Option<String>,
         }
 
         let parsed: StatusPayload = match serde_json::from_str(payload) {
             Ok(p) => p,
             Err(e) => {
-                debug_log!(self, "pane_status: invalid payload: {}", e);
+                error!(err = format!("{}", e).as_str(); "invalid pane_status payload");
                 return;
             }
         };
@@ -686,7 +666,7 @@ impl ZellijSmartTabsPlugin {
         let pane_id: u32 = match parsed.pane_id.parse() {
             Ok(id) => id,
             Err(_) => {
-                debug_log!(self, "pane_status: invalid pane_id: {}", parsed.pane_id);
+                debug!(pane_id = parsed.pane_id.as_str(); "invalid pane_id in pane_status");
                 return;
             }
         };
@@ -694,20 +674,27 @@ impl ZellijSmartTabsPlugin {
         let new_status = parsed.status;
 
         if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
-            if pane.status != new_status {
-                debug_log!(
-                    self,
-                    "pane {} status: {} -> {}",
-                    pane_id,
-                    pane.status,
-                    new_status
+            let status_changed = pane.status != new_status;
+            let on_focus_changed = pane.on_focus != parsed.on_focus;
+
+            if status_changed || on_focus_changed {
+                debug!(
+                    pane_id = pane_id,
+                    from = pane.status.as_str(),
+                    to = new_status.as_str(),
+                    on_focus_from = format!("{:?}", pane.on_focus).as_str(),
+                    on_focus_to = format!("{:?}", parsed.on_focus).as_str();
+                    "pane status changed"
                 );
                 let tab_id = pane.tab_id;
                 pane.status = new_status;
-                self.schedule_rename(tab_id);
+                pane.on_focus = parsed.on_focus;
+                if status_changed {
+                    self.schedule_rename(tab_id);
+                }
             }
         } else {
-            debug_log!(self, "pane_status: pane {} not found", pane_id);
+            debug!(pane_id = pane_id; "pane not found for pane_status");
         }
     }
 
@@ -788,7 +775,6 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
             self.config(),
             &self.tab_store,
             &self.pane_store,
-            &self.log_buffer,
             &self.last_rename,
         );
     }
@@ -816,8 +802,7 @@ mod tests {
             pending_renames: HashSet::new(),
             poll_ticks: 0,
             active_view: 0,
-            scroll_offsets: [0; 5],
-            log_buffer: VecDeque::new(),
+            scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
         }
@@ -1062,4 +1047,191 @@ mod tests {
         assert!(parse_semver("0.43.9").unwrap() < MIN_ZELLIJ_VERSION);
     }
 
+    #[test]
+    fn test_pane_status_on_focus_stored() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        let payload = r#"{"pane_id":"10","status":"🔔 new","on_focus":"idle"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.status, "🔔 new");
+        assert_eq!(pane.on_focus, Some("idle".into()));
+    }
+
+    #[test]
+    fn test_pane_status_without_on_focus_is_noop() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        let payload = r#"{"pane_id":"10","status":"running"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.status, "running");
+        assert_eq!(pane.on_focus, None);
+    }
+
+    #[test]
+    fn test_pane_status_on_focus_overwritten_by_second_call() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        let payload1 = r#"{"pane_id":"10","status":"🔔 new","on_focus":"idle"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload1.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        let payload2 = r#"{"pane_id":"10","status":"🔔 urgent","on_focus":"read"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload2.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.status, "🔔 urgent");
+        assert_eq!(pane.on_focus, Some("read".into()));
+    }
+
+    #[test]
+    fn test_on_focus_status_applied_when_pane_focused() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        let payload = r#"{"pane_id":"10","status":"🔔 new","on_focus":"idle"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        // Simulate pane gaining focus via PaneUpdate
+        let mut focused_pane = pane_info(10, 0, 0);
+        focused_pane.is_focused = true;
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![focused_pane],
+        )])));
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.status, "idle");
+        assert_eq!(pane.on_focus, None);
+    }
+
+    #[test]
+    fn test_on_focus_status_is_one_shot() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        let payload = r#"{"pane_id":"10","status":"🔔 new","on_focus":"idle"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        // First focus — triggers on_focus
+        let mut focused_pane = pane_info(10, 0, 0);
+        focused_pane.is_focused = true;
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![focused_pane.clone()],
+        )])));
+        assert_eq!(plugin.pane_store.panes.get(&10).unwrap().status, "idle");
+
+        // Manually set status to something else (simulating external update)
+        plugin.pane_store.panes.get_mut(&10).unwrap().status = "custom".into();
+
+        // Second focus — should NOT change status (on_focus already consumed)
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![focused_pane],
+        )])));
+        assert_eq!(plugin.pane_store.panes.get(&10).unwrap().status, "custom");
+        assert_eq!(plugin.pane_store.panes.get(&10).unwrap().on_focus, None);
+    }
 }
