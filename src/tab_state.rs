@@ -60,15 +60,17 @@ pub struct TabState {
     pub position: usize,
     pub name: String,
     pub is_managed: bool,
+    pub is_active: bool,
 }
 
 impl TabState {
-    pub fn new(tab_id: usize, position: usize, name: String) -> Self {
+    pub fn new(tab_id: usize, position: usize, name: String, is_active: bool) -> Self {
         Self {
             tab_id,
             position,
             name,
             is_managed: true,
+            is_active,
         }
     }
 }
@@ -83,17 +85,18 @@ impl TabStore {
     /// or tabs where the user cleared the name to restore auto-management).
     pub fn sync_tabs(
         &mut self,
-        tab_infos: &[(usize, usize, String)], // (tab_id, position, name)
+        tab_infos: &[(usize, usize, String, bool)], // (tab_id, position, name, active)
     ) -> Vec<usize> {
         let mut needs_rename = Vec::new();
         let current_ids: std::collections::HashSet<usize> =
-            tab_infos.iter().map(|(id, _, _)| *id).collect();
+            tab_infos.iter().map(|(id, _, _, _)| *id).collect();
 
         self.tabs.retain(|id, _| current_ids.contains(id));
 
-        for (tab_id, position, name) in tab_infos {
+        for (tab_id, position, name, active) in tab_infos {
             if let Some(state) = self.tabs.get_mut(tab_id) {
                 state.position = *position;
+                state.is_active = *active;
                 // Empty name = user wants to restore auto-management
                 if name.trim().is_empty() && !state.is_managed {
                     state.is_managed = true;
@@ -102,7 +105,7 @@ impl TabStore {
                 state.name = name.clone();
             } else {
                 self.tabs
-                    .insert(*tab_id, TabState::new(*tab_id, *position, name.clone()));
+                    .insert(*tab_id, TabState::new(*tab_id, *position, name.clone(), *active));
                 needs_rename.push(*tab_id);
             }
         }
@@ -134,22 +137,22 @@ mod tests {
     #[test]
     fn test_new_tabs_need_renaming() {
         let mut store = TabStore::default();
-        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())]);
+        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
         assert_eq!(needs.len(), 2);
     }
 
     #[test]
     fn test_existing_tabs_dont_need_renaming() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(1, 0, "Tab #1".into())]);
-        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into())]);
+        store.sync_tabs(&[(1, 0, "Tab #1".into(), true)]);
+        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into(), true)]);
         assert!(needs.is_empty());
     }
 
     #[test]
     fn test_unmanaged_tab_excluded_from_auto_renameable() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(1, 0, "Tab #1".into())]);
+        store.sync_tabs(&[(1, 0, "Tab #1".into(), true)]);
         store.tabs.get_mut(&1).unwrap().is_managed = false;
         assert!(store.auto_renameable().is_empty());
     }
@@ -157,7 +160,7 @@ mod tests {
     #[test]
     fn test_restore_managed() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(1, 0, "Tab #1".into())]);
+        store.sync_tabs(&[(1, 0, "Tab #1".into(), true)]);
         store.tabs.get_mut(&1).unwrap().is_managed = false;
         assert!(store.auto_renameable().is_empty());
         store.tabs.get_mut(&1).unwrap().is_managed = true;
@@ -167,15 +170,15 @@ mod tests {
     #[test]
     fn test_closed_tab_removed() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(1, 0, "Tab #1".into()), (2, 1, "Tab #2".into())]);
-        store.sync_tabs(&[(1, 0, "Tab #1".into())]);
+        store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
+        store.sync_tabs(&[(1, 0, "Tab #1".into(), true)]);
         assert_eq!(store.tabs.len(), 1);
     }
 
     #[test]
     fn test_tab_id_at_position() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(10, 0, "Tab #1".into()), (20, 1, "Tab #2".into())]);
+        store.sync_tabs(&[(10, 0, "Tab #1".into(), true), (20, 1, "Tab #2".into(), true)]);
         assert_eq!(store.tab_id_at_position(0), Some(10));
         assert_eq!(store.tab_id_at_position(1), Some(20));
         assert_eq!(store.tab_id_at_position(99), None);

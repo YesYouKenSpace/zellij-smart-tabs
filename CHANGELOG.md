@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- fix: `on_focus` only triggers when both pane and tab are focused, preventing false triggers on background tabs (#16)
+
+## [0.2.1] - 2026-04-30
+
 - feat: `on_focus` field for `pane_status` pipe command — auto-transition pane status when pane gains focus (one-shot), useful for clearing notification badges (#14)
 - fix: schedule debounce timer immediately on rename, avoiding up to 5s delay when idle (#14)
 - feat: pane id and tab id displayed in Panes debug UI view (#13)
@@ -14,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - refactor: removed in-plugin Log UI view in favor of stderr JSON logs (#14)
 - feat: configurable skip_programs to skip wrapper commands (e.g. sudo) during program detection
 - feat: display terminal_command and running_command in Panes UI view
-- fix: remove stray pipe separator from default format when status is empty
-- feat: validate user format templates at config load, fall back to default with warning on parse error
+- fix: remove stray pipe separator from default format when status is empty (#12)
+- feat: validate user format templates at config load, fall back to default with warning on parse error (#12)
+- build(deps): bump rand from 0.8.5 to 0.8.6 (#10)
 - security: Github workflow did not contain permissions (#9)
 - fix: removed persistence code since it is not working yet (#8)
 
