@@ -236,9 +236,9 @@ impl ZellijSmartTabsPlugin {
     }
 
     fn handle_tab_update(&mut self, tabs: Vec<TabInfo>) {
-        let tab_infos: Vec<(usize, usize, String)> = tabs
+        let tab_infos: Vec<(usize, usize, String, bool)> = tabs
             .iter()
-            .map(|t| (t.tab_id, t.position, t.name.clone()))
+            .map(|t| (t.tab_id, t.position, t.name.clone(), t.active))
             .collect();
 
         let needs_rename = self.tab_store.sync_tabs(&tab_infos);
@@ -308,8 +308,8 @@ impl ZellijSmartTabsPlugin {
                         existing.program = program;
                         changed = true;
                     }
-                    // Apply on_focus_status when pane gains focus (one-shot: take clears it)
-                    if pane.is_focused {
+                    // Apply on_focus when both tab and pane are focused (one-shot: take clears it)
+                    if pane.is_focused && tab.is_active {
                         if let Some(new_status) = existing.on_focus.take() {
                             debug!(pane_id = pane.id, from = existing.status.as_str(), to = new_status.as_str(); "on_focus applied");
                             existing.status = new_status;
@@ -815,6 +815,7 @@ mod tests {
             tab_id,
             position,
             name: name.into(),
+            active: true,
             ..Default::default()
         }
     }
@@ -1235,5 +1236,51 @@ mod tests {
         )])));
         assert_eq!(plugin.pane_store.panes.get(&10).unwrap().status, "custom");
         assert_eq!(plugin.pane_store.panes.get(&10).unwrap().on_focus, None);
+    }
+
+    #[test]
+    fn test_on_focus_not_applied_when_tab_inactive() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        // Tab is active initially
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        // Set pane_status with on_focus
+        let payload = r#"{"pane_id":"10","status":"🔔 new","on_focus":"idle"}"#;
+        plugin.handle_pipe(PipeMessage {
+            source: PipeSource::Cli(String::new()),
+            name: "pane_status".into(),
+            payload: Some(payload.into()),
+            args: std::collections::BTreeMap::new(),
+            is_private: true,
+        });
+
+        // Switch tab to inactive
+        let mut inactive_tab = tab_info(1, 0, "Tab #1");
+        inactive_tab.active = false;
+        plugin.handle_event(Event::TabUpdate(vec![inactive_tab]));
+
+        // Pane is focused but tab is inactive — on_focus should NOT trigger
+        let mut focused_pane = pane_info(10, 0, 0);
+        focused_pane.is_focused = true;
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![focused_pane],
+        )])));
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.status, "🔔 new");
+        assert_eq!(pane.on_focus, Some("idle".into()));
     }
 }
