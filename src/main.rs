@@ -770,12 +770,14 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
         ui::render_dashboard(
             rows,
             cols,
-            self.active_view,
-            &self.scroll_offsets,
-            self.config(),
-            &self.tab_store,
-            &self.pane_store,
-            &self.last_rename,
+            &ui::DashboardContext {
+                active_view: self.active_view,
+                scroll_offsets: &self.scroll_offsets,
+                config: self.config(),
+                tab_store: &self.tab_store,
+                pane_store: &self.pane_store,
+                last_rename: &self.last_rename,
+            },
         );
     }
 }

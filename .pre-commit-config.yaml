@@ -3,3 +3,11 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+  - repo: local
+    hooks:
+      - id: clippy
+        name: clippy
+        entry: cargo clippy --target wasm32-wasip1 -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
