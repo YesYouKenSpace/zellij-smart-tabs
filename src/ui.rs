@@ -69,6 +69,7 @@ fn render_status(rows: usize, cols: usize, config: &Config) {
         format!("Format:     {}", config.format),
         format!("Poll:       {}s", config.poll_interval),
         format!("Debug:      {}", if config.debug { "on" } else { "off" }),
+        format!("Prefix Dedup: {}", if config.prefix_dedup { "on" } else { "off" }),
     ];
     for (i, line) in lines.iter().take(rows).enumerate() {
         let text = if i == 0 {
@@ -211,6 +212,14 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
     lines.push(Text::new(format!(
         "  debug:         Enable debug logging (current: {})",
         config.debug
+    )));
+    lines.push(Text::new(format!(
+        "  prefix_dedup:  Strip redundant prefix from adjacent tabs (current: {})",
+        config.prefix_dedup
+    )));
+    lines.push(Text::new(format!(
+        "  prefix_dedup_format: Group template (current: {})",
+        config.prefix_dedup_format
     )));
     for (i, line) in lines.iter().skip(scroll).take(rows).enumerate() {
         print_text_with_coordinates(line.clone(), 0, 1 + i, Some(cols), None);

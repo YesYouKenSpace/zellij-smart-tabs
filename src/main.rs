@@ -110,6 +110,9 @@ impl ZellijSmartTabsPlugin {
         if let Some(err) = &self.config().format_error {
             warn!(err = err.as_str(); "invalid format template, using default");
         }
+        if let Some(err) = &self.config().prefix_dedup_format_error {
+            warn!(err = err.as_str(); "invalid prefix_dedup_format template, prefix dedup disabled");
+        }
     }
 
     fn initialize(&mut self, configuration: BTreeMap<String, String>) {
@@ -179,11 +182,9 @@ impl ZellijSmartTabsPlugin {
         minijinja::Value::from_serialize(&ctx)
     }
 
-
-
     fn rename_tab_for(&mut self, tab_id: usize) {
-        let state = match self.tab_store.tabs.get(&tab_id) {
-            Some(s) if s.is_managed => s,
+        match self.tab_store.tabs.get(&tab_id) {
+            Some(s) if s.is_managed => {}
             _ => return,
         };
         let has_cwd = self
@@ -196,12 +197,36 @@ impl ZellijSmartTabsPlugin {
         }
 
         let ctx = self.build_template_context(tab_id);
-        let name = template::render(&self.config().format, &ctx);
-        if !name.is_empty() && state.name != name {
-            debug!(tab_id = tab_id, name = name.as_str(); "rename tab");
-            self.host.rename_tab(tab_id as u64, name.clone());
-            self.last_rename = Some(format!("tab {} -> {:?}", tab_id, name));
-            if let Some(state) = self.tab_store.tabs.get_mut(&tab_id) {
+        let mut name = template::render(&self.config().format, &ctx);
+        let prefix = template::render(&self.config().prefix_dedup_format, &ctx);
+        if name.is_empty() {
+            return;
+        }
+
+        // Check if left neighbor has same group
+        let position = self.tab_store.tabs.get(&tab_id).map(|t| t.position);
+        let left_same_group = match position {
+            Some(pos) if pos > 0 => self.tab_store.tab_id_at_position(pos - 1)
+                .and_then(|id| self.tab_store.tabs.get(&id))
+                .map(|t| t.group == prefix)
+                .unwrap_or(false),
+            _ => false,
+        };
+        let should_strip = self.config().prefix_dedup && left_same_group;
+
+        if should_strip && name.starts_with(&prefix) {
+            let remainder = &name[prefix.len()..];
+            if !remainder.trim().is_empty() {
+                name = remainder.to_string();
+            }
+        }
+
+        if let Some(state) = self.tab_store.tabs.get_mut(&tab_id) {
+            state.group = prefix;
+            if state.name != name {
+                debug!(tab_id = tab_id, name = name.as_str(); "rename tab");
+                self.host.rename_tab(tab_id as u64, name.clone());
+                self.last_rename = Some(format!("tab {} -> {:?}", tab_id, name));
                 state.name = name;
             }
         }
@@ -221,10 +246,13 @@ impl ZellijSmartTabsPlugin {
         }
     }
 
-    /// Tick per-tab debounce counters. Tabs reaching 0 get renamed.
     /// Tabs that were re-scheduled keep waiting.
     fn tick_pending_renames(&mut self) {
-        let tab_ids: Vec<usize> = self.pending_renames.drain().collect();
+        let mut tab_ids: Vec<usize> = self.pending_renames.drain().collect();
+        // Process left-to-right so prefix dedup can check left neighbor's group
+        tab_ids.sort_by_key(|id| {
+            self.tab_store.tabs.get(id).map(|t| t.position).unwrap_or(0)
+        });
         for tab_id in tab_ids {
             self.rename_tab_for(tab_id);
         }
@@ -1282,5 +1310,235 @@ mod tests {
         let pane = plugin.pane_store.panes.get(&10).unwrap();
         assert_eq!(pane.status, "🔔 new");
         assert_eq!(pane.on_focus, Some("idle".into()));
+    }
+
+    #[test]
+    fn test_prefix_dedup_strips_trailing_tabs() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_dir }} {{ program }}".into());
+        cfg.insert("prefix_dedup_format".into(), "{{ short_dir }}".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![
+            tab_info(1, 0, "Tab #1"),
+            tab_info(2, 1, "Tab #2"),
+        ]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![
+            (0, vec![pane_info(10, 0, 0)]),
+            (1, vec![pane_info(11, 0, 0)]),
+        ])));
+
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+
+        plugin.pane_store.panes.get_mut(&10).unwrap().program = Some("nvim".into());
+        plugin.pane_store.panes.get_mut(&11).unwrap().program = Some("cargo".into());
+
+        plugin.flush_pending_renames();
+
+        // Tab 1 (leftmost): keeps full name, group stored
+        assert!(plugin.tab_store.tabs.get(&1).unwrap().name.starts_with("mydir"));
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().group, "mydir");
+        // Tab 2 (trailing): prefix "mydir" stripped
+        assert_eq!(plugin.tab_store.tabs.get(&2).unwrap().name, " cargo");
+    }
+
+    #[test]
+    fn test_prefix_dedup_different_groups_no_strip() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_dir }} {{ program }}".into());
+        cfg.insert("prefix_dedup_format".into(), "{{ short_dir }}".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![
+            tab_info(1, 0, "Tab #1"),
+            tab_info(2, 1, "Tab #2"),
+        ]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![
+            (0, vec![pane_info(10, 0, 0)]),
+            (1, vec![pane_info(11, 0, 0)]),
+        ])));
+
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/project-a"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/project-b"),
+            vec![],
+        ));
+
+        plugin.pane_store.panes.get_mut(&10).unwrap().program = Some("nvim".into());
+        plugin.pane_store.panes.get_mut(&11).unwrap().program = Some("cargo".into());
+
+        plugin.flush_pending_renames();
+
+        assert_eq!(
+            plugin.tab_store.tabs.get(&1).unwrap().name,
+            "project-a nvim"
+        );
+        assert_eq!(
+            plugin.tab_store.tabs.get(&2).unwrap().name,
+            "project-b cargo"
+        );
+    }
+
+    #[test]
+    fn test_prefix_dedup_non_adjacent_no_strip() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_dir }} {{ program }}".into());
+        cfg.insert("prefix_dedup_format".into(), "{{ short_dir }}".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![
+            tab_info(1, 0, "Tab #1"),
+            tab_info(2, 1, "Tab #2"),
+            tab_info(3, 2, "Tab #3"),
+        ]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![
+            (0, vec![pane_info(10, 0, 0)]),
+            (1, vec![pane_info(11, 0, 0)]),
+            (2, vec![pane_info(12, 0, 0)]),
+        ])));
+
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/other"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(12),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+
+        plugin.pane_store.panes.get_mut(&10).unwrap().program = Some("nvim".into());
+        plugin.pane_store.panes.get_mut(&11).unwrap().program = Some("zsh".into());
+        plugin.pane_store.panes.get_mut(&12).unwrap().program = Some("cargo".into());
+
+        plugin.flush_pending_renames();
+
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "mydir nvim");
+        assert_eq!(plugin.tab_store.tabs.get(&2).unwrap().name, "other zsh");
+        assert_eq!(plugin.tab_store.tabs.get(&3).unwrap().name, "mydir cargo");
+    }
+
+    #[test]
+    fn test_prefix_dedup_disabled_no_strip() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_dir }} {{ program }}".into());
+        cfg.insert("prefix_dedup_format".into(), "{{ short_dir }}".into());
+        cfg.insert("prefix_dedup".into(), "false".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![
+            tab_info(1, 0, "Tab #1"),
+            tab_info(2, 1, "Tab #2"),
+        ]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![
+            (0, vec![pane_info(10, 0, 0)]),
+            (1, vec![pane_info(11, 0, 0)]),
+        ])));
+
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+
+        plugin.pane_store.panes.get_mut(&10).unwrap().program = Some("nvim".into());
+        plugin.pane_store.panes.get_mut(&11).unwrap().program = Some("cargo".into());
+
+        plugin.flush_pending_renames();
+
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "mydir nvim");
+        assert_eq!(plugin.tab_store.tabs.get(&2).unwrap().name, "mydir cargo");
+    }
+
+    #[test]
+    fn test_prefix_dedup_strip_leaves_empty_keeps_full() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_dir }}".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![
+            tab_info(1, 0, "Tab #1"),
+            tab_info(2, 1, "Tab #2"),
+        ]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![
+            (0, vec![pane_info(10, 0, 0)]),
+            (1, vec![pane_info(11, 0, 0)]),
+        ])));
+
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/mydir"),
+            vec![],
+        ));
+
+        plugin.flush_pending_renames();
+
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "mydir");
+        assert_eq!(plugin.tab_store.tabs.get(&2).unwrap().name, "mydir");
     }
 }

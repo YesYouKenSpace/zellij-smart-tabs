@@ -59,6 +59,7 @@ pub struct TabState {
     pub tab_id: usize,
     pub position: usize,
     pub name: String,
+    pub group: String,
     pub is_managed: bool,
     pub is_active: bool,
 }
@@ -69,6 +70,7 @@ impl TabState {
             tab_id,
             position,
             name,
+            group: String::new(),
             is_managed: true,
             is_active,
         }
@@ -104,8 +106,10 @@ impl TabStore {
                 }
                 state.name = name.clone();
             } else {
-                self.tabs
-                    .insert(*tab_id, TabState::new(*tab_id, *position, name.clone(), *active));
+                self.tabs.insert(
+                    *tab_id,
+                    TabState::new(*tab_id, *position, name.clone(), *active),
+                );
                 needs_rename.push(*tab_id);
             }
         }
@@ -137,7 +141,8 @@ mod tests {
     #[test]
     fn test_new_tabs_need_renaming() {
         let mut store = TabStore::default();
-        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
+        let needs =
+            store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
         assert_eq!(needs.len(), 2);
     }
 
@@ -178,7 +183,10 @@ mod tests {
     #[test]
     fn test_tab_id_at_position() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(10, 0, "Tab #1".into(), true), (20, 1, "Tab #2".into(), true)]);
+        store.sync_tabs(&[
+            (10, 0, "Tab #1".into(), true),
+            (20, 1, "Tab #2".into(), true),
+        ]);
         assert_eq!(store.tab_id_at_position(0), Some(10));
         assert_eq!(store.tab_id_at_position(1), Some(20));
         assert_eq!(store.tab_id_at_position(99), None);

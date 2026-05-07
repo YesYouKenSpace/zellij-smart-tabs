@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 // NOTE: Keep DEFAULT_FORMAT in sync with README.md § Format Gallery "Default" entry
 // and test_gallery_formats_render in this file.
-const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %}{% if status %} | {{ status }}{% endif %}";
+const DEFAULT_FORMAT: &str = "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}\u{eab6} {{ program }}{% if status %} | {{ status }}{% endif %}";
+const DEFAULT_PREFIX_DEDUP_FORMAT: &str =
+    "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}\u{eab6} ";
 
 #[derive(Debug, Clone)]
 pub struct Substitutions {
@@ -45,6 +47,9 @@ pub struct Config {
     pub poll_interval: f64,
     pub debounce: f64,
     pub debug: bool,
+    pub prefix_dedup: bool,
+    pub prefix_dedup_format: String,
+    pub prefix_dedup_format_error: Option<String>,
     pub substitutions: Substitutions,
     pub skip_programs: HashSet<String>,
 }
@@ -74,6 +79,20 @@ impl Config {
             .map(|v| v.trim().to_lowercase() == "true")
             .unwrap_or(false);
 
+        let prefix_dedup = map
+            .get("prefix_dedup")
+            .map(|v| v.trim().to_lowercase() != "false")
+            .unwrap_or(true);
+
+        let (prefix_dedup_format, prefix_dedup_format_error) = match map.get("prefix_dedup_format")
+        {
+            Some(user_fmt) => match crate::template::validate_format(user_fmt) {
+                Ok(()) => (user_fmt.clone(), None),
+                Err(e) => (DEFAULT_PREFIX_DEDUP_FORMAT.to_string(), Some(e)),
+            },
+            None => (DEFAULT_PREFIX_DEDUP_FORMAT.to_string(), None),
+        };
+
         let mut substitutions = Substitutions::default();
         if let Some(raw) = map.get("sub") {
             let user_subs = parse_substitutions(raw);
@@ -99,6 +118,9 @@ impl Config {
             poll_interval,
             debounce,
             debug,
+            prefix_dedup,
+            prefix_dedup_format,
+            prefix_dedup_format_error,
             substitutions,
             skip_programs,
         }
@@ -165,6 +187,9 @@ mod tests {
         assert!(c.format.contains("short_dir"));
         assert_eq!(c.poll_interval, 5.0);
         assert_eq!(c.debounce, 0.2);
+        assert!(c.prefix_dedup);
+        assert!(c.prefix_dedup_format.contains("short_git_root"));
+        assert!(c.prefix_dedup_format_error.is_none());
         // Default substitutions are populated
         let defaults = Substitutions::default();
         assert_eq!(
@@ -347,5 +372,25 @@ mod tests {
             c.substitutions.program.get("nvim"),
             defaults.program.get("nvim")
         );
+    }
+
+    #[test]
+    fn test_prefix_dedup_disabled() {
+        let c = config_with(&[("prefix_dedup", "false")]);
+        assert!(!c.prefix_dedup);
+    }
+
+    #[test]
+    fn test_custom_prefix_dedup_format() {
+        let c = config_with(&[("prefix_dedup_format", "{{ short_dir }}")]);
+        assert_eq!(c.prefix_dedup_format, "{{ short_dir }}");
+        assert!(c.prefix_dedup_format_error.is_none());
+    }
+
+    #[test]
+    fn test_invalid_prefix_dedup_format_falls_back() {
+        let c = config_with(&[("prefix_dedup_format", "{{ invalid")]);
+        assert!(c.prefix_dedup_format.contains("short_git_root"));
+        assert!(c.prefix_dedup_format_error.is_some());
     }
 }
