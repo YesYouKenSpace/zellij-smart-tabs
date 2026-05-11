@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- feat: simplify `$HOME` path to `~` in tab names and dashboard display (#17)
 - fix: `on_focus` only triggers when both pane and tab are focused, preventing false triggers on background tabs (#16)
 
 ## [0.2.1] - 2026-04-30

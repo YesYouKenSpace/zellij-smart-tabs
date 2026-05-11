@@ -41,6 +41,8 @@ struct ZellijSmartTabsPlugin {
     scroll_offsets: [usize; ui::VIEW_COUNT],
     last_rename: Option<String>,
     version_error: Option<String>,
+    /// Cached $HOME for tilde-replacing display paths. None if env unavailable.
+    home_dir: Option<String>,
 }
 
 #[cfg(not(test))]
@@ -58,6 +60,7 @@ impl Default for ZellijSmartTabsPlugin {
             scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
+            home_dir: std::env::var("HOME").ok(),
         }
     }
 }
@@ -330,6 +333,8 @@ impl ZellijSmartTabsPlugin {
                             short_dir: None,
                             git_root: None,
                             short_git_root: None,
+                            raw_cwd: None,
+                            raw_git_root: None,
                             program,
                             terminal_command: pane.terminal_command.clone(),
                             running_command: None,
@@ -358,9 +363,9 @@ impl ZellijSmartTabsPlugin {
         };
 
         let changed = if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
-            if pane.cwd.as_ref() != Some(&cwd_str) {
+            if pane.raw_cwd.as_ref() != Some(&cwd_str) {
                 debug!(pane_id = pane_id, tab_id = tab_id, cwd = cwd_str.as_str(); "cwd changed");
-                pane.set_cwd(cwd_str.clone());
+                pane.set_cwd(cwd_str.clone(), self.home_dir.as_deref());
                 self.request_git_info(pane_id, &cwd_str);
                 true
             } else {
@@ -402,9 +407,9 @@ impl ZellijSmartTabsPlugin {
                 CMD_GIT_ROOT => {
                     if success {
                         if let Some(root) = parse_git_root(&stdout) {
-                            if pane.git_root.as_ref() != Some(&root) {
+                            if pane.raw_git_root.as_ref() != Some(&root) {
                                 debug!(pane_id = pane_id, tab_id = tab_id, git_root = root.as_str(); "git_root changed");
-                                pane.set_git_root(root);
+                                pane.set_git_root(root, self.home_dir.as_deref());
                                 true
                             } else {
                                 false
@@ -438,7 +443,7 @@ impl ZellijSmartTabsPlugin {
             .pane_store
             .panes
             .iter()
-            .filter(|(_, p)| p.cwd.is_none())
+            .filter(|(_, p)| p.raw_cwd.is_none())
             .map(|(&id, _)| id)
             .collect();
         for pane_id in panes_missing_cwd {
@@ -448,7 +453,7 @@ impl ZellijSmartTabsPlugin {
                     let tab_id = self.pane_store.panes.get(&pane_id).map(|p| p.tab_id);
                     if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
                         debug!(pane_id = pane_id, cwd = cwd_str.as_str(); "cwd polled");
-                        pane.set_cwd(cwd_str.clone());
+                        pane.set_cwd(cwd_str.clone(), self.home_dir.as_deref());
                     }
                     if let Some(tab_id) = tab_id {
                         changed_tabs.insert(tab_id);
@@ -486,12 +491,12 @@ impl ZellijSmartTabsPlugin {
 
             // Refresh git info for panes with CWD on auto-managed tabs
             let should_refresh_git = self.pane_store.panes.get(&pane_id).and_then(|p| {
-                if p.cwd.is_some() {
+                if p.raw_cwd.is_some() {
                     self.tab_store
                         .tabs
                         .get(&p.tab_id)
                         .filter(|t| t.is_managed)
-                        .map(|_| p.cwd.clone().unwrap())
+                        .map(|_| p.raw_cwd.as_deref().unwrap().to_string())
                 } else {
                     None
                 }
@@ -807,6 +812,7 @@ mod tests {
             scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
+            home_dir: None,
         }
     }
 
@@ -1282,5 +1288,128 @@ mod tests {
         let pane = plugin.pane_store.panes.get(&10).unwrap();
         assert_eq!(pane.status, "🔔 new");
         assert_eq!(pane.on_focus, Some("idle".into()));
+    }
+
+    fn make_plugin_with_home(mock: MockZellijHost, home_dir: Option<String>) -> ZellijSmartTabsPlugin {
+        let mut plugin = make_plugin(mock);
+        plugin.home_dir = home_dir;
+        plugin
+    }
+
+    #[test]
+    fn test_tilde_replacement_git_root() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin_with_home(mock, Some("/home/user".into()));
+        let mut cfg = default_config();
+        cfg.insert("format".into(), "{{ short_git_root }}".into());
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/project"),
+            vec![],
+        ));
+
+        let mut ctx = BTreeMap::new();
+        ctx.insert(CTX_PANE_ID.into(), "10".into());
+        ctx.insert(CTX_COMMAND_TYPE.into(), CMD_GIT_ROOT.into());
+        plugin.handle_event(Event::RunCommandResult(
+            Some(0),
+            b"/home/user/project\n".to_vec(),
+            vec![],
+            ctx,
+        ));
+
+        let pane = plugin.pane_store.panes.get(&10).unwrap();
+        assert_eq!(pane.git_root.as_deref(), Some("~/project"), "git_root display");
+        assert_eq!(pane.raw_git_root.as_deref(), Some("/home/user/project"), "raw_git_root");
+        assert_eq!(pane.short_git_root.as_deref(), Some("project"), "short_git_root");
+    }
+
+    #[test]
+    fn test_tilde_replacement_in_tab_rename() {
+        struct Case {
+            label: &'static str,
+            cwd: &'static str,
+            home: Option<String>,
+            expected_rename: &'static str,
+            expected_cwd: &'static str,
+            expected_raw_cwd: &'static str,
+            expected_short_dir: &'static str,
+        }
+
+        let cases = vec![
+            Case {
+                label: "home dir itself becomes ~",
+                cwd: "/home/user",
+                home: Some("/home/user".into()),
+                expected_rename: "~",
+                expected_cwd: "~",
+                expected_raw_cwd: "/home/user",
+                expected_short_dir: "~",
+            },
+            Case {
+                label: "subdirectory keeps last component as short_dir",
+                cwd: "/home/user/project",
+                home: Some("/home/user".into()),
+                expected_rename: "project",
+                expected_cwd: "~/project",
+                expected_raw_cwd: "/home/user/project",
+                expected_short_dir: "project",
+            },
+            Case {
+                label: "no home_dir leaves paths unchanged",
+                cwd: "/home/user/project",
+                home: None,
+                expected_rename: "project",
+                expected_cwd: "/home/user/project",
+                expected_raw_cwd: "/home/user/project",
+                expected_short_dir: "project",
+            },
+        ];
+
+        for case in cases {
+            let mut mock = MockZellijHost::new();
+            mock.expect_set_timeout().returning(|_| ());
+            mock.expect_rename_tab()
+                .withf({
+                    let expected = case.expected_rename.to_string();
+                    move |_, name| name == &expected
+                })
+                .times(1)
+                .returning(|_, _| ());
+            mock.expect_run_command().returning(|_, _, _, _| ());
+
+            let mut plugin = make_plugin_with_home(mock, case.home);
+            plugin.config = Some(Config::from_map(&default_config()));
+            plugin.permissions_granted = true;
+
+            plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+            plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+                0,
+                vec![pane_info(10, 0, 0)],
+            )])));
+            plugin.handle_event(Event::CwdChanged(
+                PaneId::Terminal(10),
+                std::path::PathBuf::from(case.cwd),
+                vec![],
+            ));
+            plugin.flush_pending_renames();
+
+            let pane = plugin.pane_store.panes.get(&10).unwrap();
+            assert_eq!(pane.cwd.as_deref(), Some(case.expected_cwd), "{}: cwd", case.label);
+            assert_eq!(pane.raw_cwd.as_deref(), Some(case.expected_raw_cwd), "{}: raw_cwd", case.label);
+            assert_eq!(pane.short_dir.as_deref(), Some(case.expected_short_dir), "{}: short_dir", case.label);
+        }
     }
 }

@@ -1,4 +1,4 @@
-use crate::utils::short_path;
+use crate::utils::{short_path, tilde_path};
 use std::collections::HashMap;
 
 pub const DEFAULT_STATUS: &str = "idle";
@@ -13,6 +13,8 @@ pub struct PaneState {
     pub short_dir: Option<String>,
     pub git_root: Option<String>,
     pub short_git_root: Option<String>,
+    pub raw_cwd: Option<String>,
+    pub raw_git_root: Option<String>,
     pub program: Option<String>,
     /// Set when the pane is a command pane (started with `zellij run`).
     /// When set, `program` comes from this and we skip polling `get_pane_running_command`.
@@ -23,20 +25,34 @@ pub struct PaneState {
     pub on_focus: Option<String>,
 }
 
+fn display_path(raw: &str, home: Option<&str>) -> (String, String) {
+    let display = match home {
+        Some(h) => tilde_path(raw, h),
+        None => raw.to_string(),
+    };
+    let short = short_path(&display);
+    (display, short)
+}
+
 impl PaneState {
-    pub fn set_cwd(&mut self, cwd: String) {
-        self.short_dir = Some(short_path(&cwd));
-        self.cwd = Some(cwd);
+    pub fn set_cwd(&mut self, cwd: String, home: Option<&str>) {
+        let (display, short) = display_path(&cwd, home);
+        self.raw_cwd = Some(cwd);
+        self.short_dir = Some(short);
+        self.cwd = Some(display);
     }
 
-    pub fn set_git_root(&mut self, root: String) {
-        self.short_git_root = Some(short_path(&root));
-        self.git_root = Some(root);
+    pub fn set_git_root(&mut self, root: String, home: Option<&str>) {
+        let (display, short) = display_path(&root, home);
+        self.raw_git_root = Some(root);
+        self.short_git_root = Some(short);
+        self.git_root = Some(display);
     }
 
     pub fn clear_git(&mut self) {
         self.git_root = None;
         self.short_git_root = None;
+        self.raw_git_root = None;
     }
 }
 
@@ -197,6 +213,8 @@ mod tests {
                 short_dir: Some("a".into()),
                 git_root: None,
                 short_git_root: None,
+                raw_cwd: None,
+                raw_git_root: None,
                 program: Some("nvim".into()),
                 terminal_command: None,
                 running_command: None,
@@ -214,6 +232,8 @@ mod tests {
                 short_dir: Some("b".into()),
                 git_root: None,
                 short_git_root: None,
+                raw_cwd: None,
+                raw_git_root: None,
                 program: None,
                 terminal_command: None,
                 running_command: None,
@@ -229,9 +249,8 @@ mod tests {
         assert_eq!(pane_store.panes_for_tab(99).len(), 0);
     }
 
-    #[test]
-    fn test_pane_set_cwd_updates_short_dir() {
-        let mut pane = PaneState {
+    fn make_pane() -> PaneState {
+        PaneState {
             pane_id: 1,
             tab_id: 1,
             position: 0,
@@ -239,33 +258,67 @@ mod tests {
             short_dir: None,
             git_root: None,
             short_git_root: None,
+            raw_cwd: None,
+            raw_git_root: None,
             program: None,
             terminal_command: None,
             running_command: None,
             status: DEFAULT_STATUS.to_string(),
             on_focus: None,
-        };
-        pane.set_cwd("/home/user/Projects/my-project".into());
+        }
+    }
+
+    #[test]
+    fn test_pane_set_cwd_updates_short_dir() {
+        let mut pane = make_pane();
+        pane.set_cwd("/home/user/Projects/my-project".into(), None);
         assert_eq!(pane.short_dir, Some("my-project".into()));
+        assert_eq!(pane.cwd, Some("/home/user/Projects/my-project".into()));
+        assert_eq!(pane.raw_cwd, Some("/home/user/Projects/my-project".into()));
     }
 
     #[test]
     fn test_pane_set_git_root_updates_short() {
-        let mut pane = PaneState {
-            pane_id: 1,
-            tab_id: 1,
-            position: 0,
-            cwd: None,
-            short_dir: None,
-            git_root: None,
-            short_git_root: None,
-            program: None,
-            terminal_command: None,
-            running_command: None,
-            status: DEFAULT_STATUS.to_string(),
-            on_focus: None,
-        };
-        pane.set_git_root("/home/user/Projects/my-project".into());
+        let mut pane = make_pane();
+        pane.set_git_root("/home/user/Projects/my-project".into(), None);
         assert_eq!(pane.short_git_root, Some("my-project".into()));
+        assert_eq!(pane.git_root, Some("/home/user/Projects/my-project".into()));
+        assert_eq!(pane.raw_git_root, Some("/home/user/Projects/my-project".into()));
+    }
+
+    #[test]
+    fn test_pane_set_cwd_with_home() {
+        let cases = vec![
+            // (cwd, home, expected_cwd, expected_short_dir, expected_raw_cwd)
+            ("/home/user/Projects/foo", Some("/home/user"), "~/Projects/foo", "foo", "/home/user/Projects/foo"),
+            ("/home/user", Some("/home/user"), "~", "~", "/home/user"),
+            ("/etc/config", Some("/home/user"), "/etc/config", "config", "/etc/config"),
+        ];
+        for (cwd, home, exp_cwd, exp_short, exp_raw) in cases {
+            let mut pane = make_pane();
+            pane.set_cwd(cwd.into(), home);
+            assert_eq!(pane.cwd.as_deref(), Some(exp_cwd), "cwd for input {:?}", cwd);
+            assert_eq!(pane.short_dir.as_deref(), Some(exp_short), "short_dir for input {:?}", cwd);
+            assert_eq!(pane.raw_cwd.as_deref(), Some(exp_raw), "raw_cwd for input {:?}", cwd);
+        }
+    }
+
+    #[test]
+    fn test_pane_set_git_root_with_home() {
+        let mut pane = make_pane();
+        pane.set_git_root("/home/user/Projects/foo".into(), Some("/home/user"));
+        assert_eq!(pane.git_root, Some("~/Projects/foo".into()));
+        assert_eq!(pane.short_git_root, Some("foo".into()));
+        assert_eq!(pane.raw_git_root, Some("/home/user/Projects/foo".into()));
+    }
+
+    #[test]
+    fn test_clear_git_clears_raw() {
+        let mut pane = make_pane();
+        pane.set_git_root("/home/user/project".into(), Some("/home/user"));
+        pane.clear_git();
+        assert_eq!(pane.git_root, None);
+        assert_eq!(pane.short_git_root, None);
+        assert_eq!(pane.raw_git_root, None);
     }
 }

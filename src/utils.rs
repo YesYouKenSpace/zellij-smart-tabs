@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-/// Extract the last path component from a full path.
 pub fn short_path(path: &str) -> String {
     path.rsplit('/')
         .find(|s| !s.is_empty())
@@ -8,14 +7,12 @@ pub fn short_path(path: &str) -> String {
         .to_string()
 }
 
-/// Parse git root from `git rev-parse --show-toplevel` output.
 pub fn parse_git_root(stdout: &[u8]) -> Option<String> {
     let root = String::from_utf8_lossy(stdout).trim().to_string();
     if root.is_empty() { None } else { Some(root) }
 }
 
-/// Extract program name from a command, skipping wrapper programs (e.g. "sudo").
-/// Iterates tokens, strips path prefixes, skips any in the skip set, returns first match.
+/// Skips wrapper programs (e.g. "sudo") in the skip set.
 pub fn extract_program(cmd: &[&str], skip: &HashSet<String>) -> Option<String> {
     for token in cmd {
         let basename = token.rsplit('/').next().unwrap_or(token);
@@ -30,7 +27,23 @@ pub fn extract_program(cmd: &[&str], skip: &HashSet<String>) -> Option<String> {
     None
 }
 
-
+pub fn tilde_path(path: &str, home: &str) -> String {
+    if home.is_empty() {
+        return path.to_string();
+    }
+    let home = home.trim_end_matches('/');
+    let prefix = format!("{home}/");
+    if let Some(rest) = path.strip_prefix(&prefix) {
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/{rest}");
+    }
+    if path == home {
+        return "~".to_string();
+    }
+    path.to_string()
+}
 
 #[cfg(test)]
 mod tests {
@@ -41,6 +54,7 @@ mod tests {
         assert_eq!(short_path("/home/user/Projects/my-project"), "my-project");
         assert_eq!(short_path("/home/user/Projects/my-project/"), "my-project");
         assert_eq!(short_path("/"), "/");
+        assert_eq!(short_path("~"), "~");
     }
 
     #[test]
@@ -64,5 +78,28 @@ mod tests {
         assert_eq!(extract_program(&["sudo", "nvim", "file.rs"], &skip), Some("nvim".into()));
         assert_eq!(extract_program(&["/usr/bin/sudo", "/usr/bin/nvim"], &skip), Some("nvim".into()));
         assert_eq!(extract_program(&["sudo"], &skip), None);
+    }
+
+    #[test]
+    fn test_tilde_path() {
+        let cases = vec![
+            ("/home/user", "/home/user", "~"),
+            ("/home/user/", "/home/user", "~"),
+            ("/home/user/Projects/foo", "/home/user", "~/Projects/foo"),
+            ("/etc/config", "/home/user", "/etc/config"),
+            ("/home/user", "", "/home/user"),
+            ("/home/username/foo", "/home/user", "/home/username/foo"),
+            ("/home/user", "/home/user/", "~"),
+            ("/home/user/foo", "/home/user/", "~/foo"),
+        ];
+        for (path, home, expected) in cases {
+            assert_eq!(
+                tilde_path(path, home),
+                expected,
+                "tilde_path({:?}, {:?})",
+                path,
+                home
+            );
+        }
     }
 }
