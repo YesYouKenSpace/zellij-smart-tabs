@@ -209,6 +209,13 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
         config.poll_interval
     )));
     lines.push(Text::new(format!(
+        "  path_depth:    Trailing dir components for cwd (current: {})",
+        config
+            .path_depth
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "unset (full path)".into())
+    )));
+    lines.push(Text::new(format!(
         "  debug:         Enable debug logging (current: {})",
         config.debug
     )));

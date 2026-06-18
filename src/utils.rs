@@ -7,6 +7,23 @@ pub fn short_path(path: &str) -> String {
         .to_string()
 }
 
+/// Return the last `depth` non-empty path components joined by `/`.
+/// If the path has fewer components, returns all of them (without a leading `/`).
+pub fn tail_path(path: &str, depth: usize) -> String {
+    if depth == 0 {
+        return String::new();
+    }
+    let components: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if components.is_empty() {
+        return path.to_string();
+    }
+    if components.len() <= depth {
+        components.join("/")
+    } else {
+        components[components.len() - depth..].join("/")
+    }
+}
+
 pub fn parse_git_root(stdout: &[u8]) -> Option<String> {
     let root = String::from_utf8_lossy(stdout).trim().to_string();
     if root.is_empty() { None } else { Some(root) }
@@ -55,6 +72,13 @@ mod tests {
         assert_eq!(short_path("/home/user/Projects/my-project/"), "my-project");
         assert_eq!(short_path("/"), "/");
         assert_eq!(short_path("~"), "~");
+    }
+
+    #[test]
+    fn test_tail_path() {
+        assert_eq!(tail_path("/home/user/Projects/my-project", 2), "Projects/my-project");
+        assert_eq!(tail_path("~/Projects/foo/bar", 1), "bar");
+        assert_eq!(tail_path("~", 1), "~");
     }
 
     #[test]
