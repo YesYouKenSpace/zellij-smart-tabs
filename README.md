@@ -72,6 +72,7 @@ All configuration is inline in the plugin block.
 | `format` | String | See [Format Gallery](#format-gallery) | Tab name template (Jinja2-like syntax) |
 | `poll_interval` | Number (seconds) | `5` | Timer fallback interval for polling |
 | `debounce` | Number (seconds) | `0.2` | Delay before applying tab rename after data changes |
+| `path_depth` | Number | unset | Limit number of directories shown |
 | `debug` | Bool | `true` | Enable debug logging to Zellij log |
 | `sub` | Block | - | Substitution rules (see below) |
 
@@ -125,7 +126,7 @@ These are [Nerd Font](https://www.nerdfonts.com/) icons. Make sure your terminal
 | Variable | Type | Description |
 |---|---|---|
 | `short_dir` | String | Last component of the pane's working directory |
-| `cwd` | String | Full path of the pane's working directory |
+| `cwd` | String | Working directory path (`$HOME` shortened to `~`; optionally truncated via `path_depth`) |
 | `short_git_root` | String or undefined | Last component of the git repository root path |
 | `git_root` | String or undefined | Full path to the git repository root |
 | `program` | String or undefined | Currently running program (e.g., `nvim`, `claude`, `opencode`) |
@@ -152,9 +153,14 @@ format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% e
 format "{{ short_dir }}"
 // => my-project
 
-// Full path
+// Full path - home directory shown as ~
 format "{{ cwd }}"
-// => /home/user/Projects/my-project
+// => ~/work/projects/my-project
+
+// Truncated path - reduced number of directories visible
+path_depth 2
+format "{{ cwd }}"
+// => projects/my-project
 
 // Program-first - shows what's running, then where
 format "{% if program %}{{ program }} @ {% endif %}{{ short_dir }}"
