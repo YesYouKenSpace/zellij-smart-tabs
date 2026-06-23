@@ -16,7 +16,7 @@ use host::ZellijHost;
 
 use log::{debug, error, warn};
 use tab_state::{PaneState, PaneStore, TabStore};
-use utils::{extract_program, parse_git_root};
+use utils::{extract_program, parse_git_root, truncate_path};
 
 const CTX_PANE_ID: &str = "pane_id";
 const CTX_COMMAND_TYPE: &str = "command_type";
@@ -155,13 +155,20 @@ impl ZellijSmartTabsPlugin {
         let panes = self.pane_store.panes_for_tab(tab_id);
         let status_subs = &self.config().substitutions.status;
 
+        let path_depth = self.config().path_depth;
         let pane_to_json = |p: &PaneState| -> serde_json::Value {
             let status = status_subs
                 .get(p.status.as_str())
                 .cloned()
                 .unwrap_or_else(|| p.status.as_str().to_string());
+            let cwd = p.cwd.as_ref().map(|full| {
+                match path_depth {
+                    Some(depth) => truncate_path(full, depth),
+                    None => full.clone(),
+                }
+            });
             serde_json::json!({
-                "cwd": p.cwd,
+                "cwd": cwd,
                 "short_dir": p.short_dir,
                 "git_root": p.git_root,
                 "short_git_root": p.short_git_root,
