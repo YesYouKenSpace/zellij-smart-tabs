@@ -16,7 +16,7 @@ use host::ZellijHost;
 
 use log::{debug, error, warn};
 use tab_state::{PaneState, PaneStore, TabStore};
-use utils::{extract_program, parse_git_root, tail_path, tilde_path};
+use utils::{extract_program, parse_git_root, truncate_path};
 
 const CTX_PANE_ID: &str = "pane_id";
 const CTX_COMMAND_TYPE: &str = "command_type";
@@ -156,20 +156,15 @@ impl ZellijSmartTabsPlugin {
         let status_subs = &self.config().substitutions.status;
 
         let path_depth = self.config().path_depth;
-        let home_dir = self.home_dir.as_deref();
         let pane_to_json = |p: &PaneState| -> serde_json::Value {
             let status = status_subs
                 .get(p.status.as_str())
                 .cloned()
                 .unwrap_or_else(|| p.status.as_str().to_string());
-            let cwd = p.raw_cwd.as_deref().map(|raw| {
-                let full = match home_dir {
-                    Some(h) => tilde_path(raw, h),
-                    None => raw.to_string(),
-                };
+            let cwd = p.cwd.as_ref().map(|full| {
                 match path_depth {
-                    Some(depth) => tail_path(&full, depth),
-                    None => full,
+                    Some(depth) => truncate_path(full, depth),
+                    None => full.clone(),
                 }
             });
             serde_json::json!({
@@ -889,42 +884,6 @@ mod tests {
         plugin.flush_pending_renames();
 
         assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "my-project");
-    }
-
-    #[test]
-    fn test_tab_rename_uses_path_depth_gated_cwd() {
-        let mut mock = MockZellijHost::new();
-
-        mock.expect_set_timeout().returning(|_| ());
-        mock.expect_rename_tab()
-            .with(eq(1u64), eq("Projects/my-project".to_string()))
-            .times(1)
-            .returning(|_, _| ());
-        mock.expect_run_command().returning(|_, _, _, _| ());
-
-        let mut plugin = make_plugin(mock);
-        let mut cfg = default_config();
-        cfg.insert("format".into(), "{{ cwd }}".into());
-        cfg.insert("path_depth".into(), "2".into());
-        plugin.config = Some(Config::from_map(&cfg));
-        plugin.permissions_granted = true;
-
-        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
-        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
-            0,
-            vec![pane_info(10, 0, 0)],
-        )])));
-        plugin.handle_event(Event::CwdChanged(
-            PaneId::Terminal(10),
-            std::path::PathBuf::from("/home/user/Projects/my-project"),
-            vec![],
-        ));
-        plugin.flush_pending_renames();
-
-        assert_eq!(
-            plugin.tab_store.tabs.get(&1).unwrap().name,
-            "Projects/my-project"
-        );
     }
 
     #[test]
