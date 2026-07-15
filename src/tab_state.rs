@@ -17,9 +17,7 @@ pub struct PaneState {
     pub raw_git_root: Option<String>,
     pub program: Option<String>,
     /// Set when the pane is a command pane (started with `zellij run`).
-    /// When set, `program` comes from this and we skip polling `get_pane_running_command`.
     pub terminal_command: Option<String>,
-    /// Raw output from `get_pane_running_command` for non-command panes.
     pub running_command: Option<String>,
     pub status: String,
     pub on_focus: Option<String>,
@@ -120,8 +118,10 @@ impl TabStore {
                 }
                 state.name = name.clone();
             } else {
-                self.tabs
-                    .insert(*tab_id, TabState::new(*tab_id, *position, name.clone(), *active));
+                self.tabs.insert(
+                    *tab_id,
+                    TabState::new(*tab_id, *position, name.clone(), *active),
+                );
                 needs_rename.push(*tab_id);
             }
         }
@@ -153,7 +153,8 @@ mod tests {
     #[test]
     fn test_new_tabs_need_renaming() {
         let mut store = TabStore::default();
-        let needs = store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
+        let needs =
+            store.sync_tabs(&[(1, 0, "Tab #1".into(), true), (2, 1, "Tab #2".into(), true)]);
         assert_eq!(needs.len(), 2);
     }
 
@@ -194,7 +195,10 @@ mod tests {
     #[test]
     fn test_tab_id_at_position() {
         let mut store = TabStore::default();
-        store.sync_tabs(&[(10, 0, "Tab #1".into(), true), (20, 1, "Tab #2".into(), true)]);
+        store.sync_tabs(&[
+            (10, 0, "Tab #1".into(), true),
+            (20, 1, "Tab #2".into(), true),
+        ]);
         assert_eq!(store.tab_id_at_position(0), Some(10));
         assert_eq!(store.tab_id_at_position(1), Some(20));
         assert_eq!(store.tab_id_at_position(99), None);
@@ -283,23 +287,53 @@ mod tests {
         pane.set_git_root("/home/user/Projects/my-project".into(), None);
         assert_eq!(pane.short_git_root, Some("my-project".into()));
         assert_eq!(pane.git_root, Some("/home/user/Projects/my-project".into()));
-        assert_eq!(pane.raw_git_root, Some("/home/user/Projects/my-project".into()));
+        assert_eq!(
+            pane.raw_git_root,
+            Some("/home/user/Projects/my-project".into())
+        );
     }
 
     #[test]
     fn test_pane_set_cwd_with_home() {
         let cases = vec![
             // (cwd, home, expected_cwd, expected_short_dir, expected_raw_cwd)
-            ("/home/user/Projects/foo", Some("/home/user"), "~/Projects/foo", "foo", "/home/user/Projects/foo"),
+            (
+                "/home/user/Projects/foo",
+                Some("/home/user"),
+                "~/Projects/foo",
+                "foo",
+                "/home/user/Projects/foo",
+            ),
             ("/home/user", Some("/home/user"), "~", "~", "/home/user"),
-            ("/etc/config", Some("/home/user"), "/etc/config", "config", "/etc/config"),
+            (
+                "/etc/config",
+                Some("/home/user"),
+                "/etc/config",
+                "config",
+                "/etc/config",
+            ),
         ];
         for (cwd, home, exp_cwd, exp_short, exp_raw) in cases {
             let mut pane = make_pane();
             pane.set_cwd(cwd.into(), home);
-            assert_eq!(pane.cwd.as_deref(), Some(exp_cwd), "cwd for input {:?}", cwd);
-            assert_eq!(pane.short_dir.as_deref(), Some(exp_short), "short_dir for input {:?}", cwd);
-            assert_eq!(pane.raw_cwd.as_deref(), Some(exp_raw), "raw_cwd for input {:?}", cwd);
+            assert_eq!(
+                pane.cwd.as_deref(),
+                Some(exp_cwd),
+                "cwd for input {:?}",
+                cwd
+            );
+            assert_eq!(
+                pane.short_dir.as_deref(),
+                Some(exp_short),
+                "short_dir for input {:?}",
+                cwd
+            );
+            assert_eq!(
+                pane.raw_cwd.as_deref(),
+                Some(exp_raw),
+                "raw_cwd for input {:?}",
+                cwd
+            );
         }
     }
 

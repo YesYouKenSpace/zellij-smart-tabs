@@ -34,15 +34,20 @@ struct ZellijSmartTabsPlugin {
     /// Tabs scheduled for rename on the next timer tick.
     /// Acts as a debounce — multiple events within one tick coalesce into a single rename.
     pending_renames: HashSet<usize>,
-    /// Counts debounce ticks since last poll. When it reaches the poll threshold,
-    /// a full poll cycle runs (refresh CWD, git, program).
-    poll_ticks: u32,
+    /// Count of Zellij timers currently in flight. Zellij's `set_timeout` cannot
+    /// be cancelled or deduplicated — each call yields exactly one future Timer
+    /// event — so the Timer handler re-arms only when this reaches zero. That
+    /// collapses a piled-up heartbeat plus debounce timer back into a single
+    /// chain instead of each spawning a successor, which would leak timer chains
+    /// for the life of the session. Bounded at 2 (one heartbeat + one debounce).
+    outstanding_timers: u32,
     active_view: usize,
     scroll_offsets: [usize; ui::VIEW_COUNT],
     last_rename: Option<String>,
     version_error: Option<String>,
     /// Cached $HOME for tilde-replacing display paths. None if env unavailable.
     home_dir: Option<String>,
+    confirm_reload: bool,
 }
 
 #[cfg(not(test))]
@@ -55,17 +60,18 @@ impl Default for ZellijSmartTabsPlugin {
             pane_store: PaneStore::default(),
             permissions_granted: false,
             pending_renames: HashSet::new(),
-            poll_ticks: 0,
+            outstanding_timers: 0,
             active_view: 0,
             scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
             home_dir: std::env::var("HOME").ok(),
+            confirm_reload: false,
         }
     }
 }
 
-const MIN_ZELLIJ_VERSION: (u32, u32, u32) = (0, 44, 0);
+const MIN_ZELLIJ_VERSION: (u32, u32, u32) = (0, 44, 2);
 
 fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
     let mut parts = version.split('.');
@@ -98,15 +104,47 @@ fn check_zellij_version() -> Option<String> {
 register_plugin!(ZellijSmartTabsPlugin);
 
 impl ZellijSmartTabsPlugin {
-    fn substitute_program(&self, program: Option<String>) -> Option<String> {
-        program.map(|p| {
-            self.config()
-                .substitutions
-                .program
-                .get(&p)
-                .cloned()
-                .unwrap_or(p)
-        })
+    fn sub_prog(&self, program: String) -> String {
+        self.config()
+            .substitutions
+            .program
+            .get(&program)
+            .cloned()
+            .unwrap_or(program)
+    }
+
+    /// Resolve the display program from command tokens: pick the meaningful
+    /// program (skipping wrappers via `skip_programs`) then apply substitutions.
+    fn resolve_program(&self, tokens: &[&str]) -> Option<String> {
+        extract_program(tokens, &self.config().skip_programs).map(|p| self.sub_prog(p))
+    }
+
+    /// Record a pane's latest command: store the raw `running_command` and refresh
+    /// the derived `program`. Returns the owning tab_id when `program` actually
+    /// changed, so the caller can queue a rename. `reason` labels the update
+    /// source in logs (`"event"` / `"poll"`).
+    fn update_pane_program(
+        &mut self,
+        pane_id: u32,
+        command: &[String],
+        reason: &str,
+    ) -> Option<usize> {
+        let tokens: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
+        let new_program = self.resolve_program(&tokens);
+        let pane = self.pane_store.panes.get_mut(&pane_id)?;
+        pane.running_command = Some(command.join(" "));
+        if pane.program == new_program {
+            return None;
+        }
+        debug!(
+            pane_id = pane_id,
+            program = new_program.as_deref().unwrap_or("-"),
+            source = reason;
+            "program updated"
+        );
+        let tab_id = pane.tab_id;
+        pane.program = new_program;
+        Some(tab_id)
     }
 
     fn warn_format_error(&self) {
@@ -127,16 +165,19 @@ impl ZellijSmartTabsPlugin {
         self.config.as_ref().expect("config not initialized")
     }
 
-    fn schedule_next_timer(&self) {
-        if self.pending_renames.is_empty() {
-            self.host.set_timeout(self.config().poll_interval);
-        } else {
-            self.host.set_timeout(self.config().debounce);
-        }
+    /// Arm one Zellij timer and count it. Callers gate this so timers don't
+    /// accumulate — see [`Self::outstanding_timers`].
+    fn arm(&mut self, interval: f64) {
+        self.outstanding_timers += 1;
+        self.host.set_timeout(interval);
     }
 
-    fn poll_tick_threshold(&self) -> u32 {
-        (self.config().poll_interval / self.config().debounce).ceil() as u32
+    /// Ensure the low-frequency poll heartbeat is running. No-op if any timer is
+    /// already in flight (it will re-arm on fire) — used after permission grant.
+    fn ensure_heartbeat(&mut self) {
+        if self.permissions_granted && self.outstanding_timers == 0 {
+            self.arm(self.config().poll_interval);
+        }
     }
 
     fn request_git_info(&self, pane_id: u32, cwd: &str) {
@@ -182,8 +223,6 @@ impl ZellijSmartTabsPlugin {
         minijinja::Value::from_serialize(&ctx)
     }
 
-
-
     fn rename_tab_for(&mut self, tab_id: usize) {
         let state = match self.tab_store.tabs.get(&tab_id) {
             Some(s) if s.is_managed => s,
@@ -210,11 +249,20 @@ impl ZellijSmartTabsPlugin {
         }
     }
 
+    /// Queue a tab for rename without arming a timer. Used inside the Timer
+    /// handler, which re-arms once at the end; arming here would stack timers.
+    fn mark_pending(&mut self, tab_id: usize) {
+        self.pending_renames.insert(tab_id);
+    }
+
+    /// Queue a tab for rename from an event context, arming a debounce timer if
+    /// none is chasing this batch yet. The `was_empty` guard means a burst of
+    /// events coalesces into a single debounce timer per drain cycle.
     fn schedule_rename(&mut self, tab_id: usize) {
         let was_empty = self.pending_renames.is_empty();
         self.pending_renames.insert(tab_id);
         if was_empty && self.permissions_granted {
-            self.host.set_timeout(self.config().debounce);
+            self.arm(self.config().debounce);
         }
     }
 
@@ -224,8 +272,6 @@ impl ZellijSmartTabsPlugin {
         }
     }
 
-    /// Tick per-tab debounce counters. Tabs reaching 0 get renamed.
-    /// Tabs that were re-scheduled keep waiting.
     fn tick_pending_renames(&mut self) {
         let tab_ids: Vec<usize> = self.pending_renames.drain().collect();
         for tab_id in tab_ids {
@@ -269,18 +315,19 @@ impl ZellijSmartTabsPlugin {
                 None => continue,
             };
 
-            // Sort by visual position
+            // Sort by visual position. Floating panes are excluded: they are
+            // transient overlays whose coordinates overlap the tiled grid, so a
+            // floating scratch terminal could otherwise sort into position 0 and
+            // hijack the tab name.
             let mut terminal_panes: Vec<&PaneInfo> = panes
                 .iter()
-                .filter(|p| !p.is_plugin && !p.is_suppressed)
+                .filter(|p| !p.is_plugin && !p.is_suppressed && !p.is_floating)
                 .collect();
             terminal_panes.sort_by(|a, b| a.pane_x.cmp(&b.pane_x).then(a.pane_y.cmp(&b.pane_y)));
 
             for (pos, pane) in terminal_panes.iter().enumerate() {
                 seen_pane_ids.insert(pane.id);
 
-                // For command panes, terminal_command is the definitive program source.
-                // For regular terminal panes, program is polled via get_pane_running_command in the timer.
                 let is_command_pane = pane.terminal_command.is_some();
                 let program = if is_command_pane {
                     let tokens: Vec<&str> = pane
@@ -288,7 +335,7 @@ impl ZellijSmartTabsPlugin {
                         .as_deref()
                         .map(|s| s.split_whitespace().collect())
                         .unwrap_or_default();
-                    self.substitute_program(extract_program(&tokens, &self.config().skip_programs))
+                    self.resolve_program(&tokens)
                 } else {
                     None
                 };
@@ -296,6 +343,8 @@ impl ZellijSmartTabsPlugin {
                 if let Some(existing) = self.pane_store.panes.get_mut(&pane.id) {
                     let mut changed = false;
                     if existing.tab_id != tab.tab_id {
+                        // The tab the pane left must also re-render (it lost a pane).
+                        changed_tabs.insert(existing.tab_id);
                         existing.tab_id = tab.tab_id;
                         changed = true;
                     }
@@ -312,12 +361,12 @@ impl ZellijSmartTabsPlugin {
                         changed = true;
                     }
                     // Apply on_focus when both tab and pane are focused (one-shot: take clears it)
-                    if pane.is_focused && tab.is_active {
-                        if let Some(new_status) = existing.on_focus.take() {
-                            debug!(pane_id = pane.id, from = existing.status.as_str(), to = new_status.as_str(); "on_focus applied");
-                            existing.status = new_status;
-                            changed = true;
-                        }
+                    if pane.is_focused && tab.is_active
+                        && let Some(new_status) = existing.on_focus.take()
+                    {
+                        debug!(pane_id = pane.id, from = existing.status.as_str(), to = new_status.as_str(); "on_focus applied");
+                        existing.status = new_status;
+                        changed = true;
                     }
                     if changed {
                         changed_tabs.insert(tab.tab_id);
@@ -344,6 +393,15 @@ impl ZellijSmartTabsPlugin {
                     );
                     changed_tabs.insert(tab.tab_id);
                 }
+            }
+        }
+
+        // Tabs that lost a pane (closed pane) must re-render too — a stale
+        // segment (e.g. a format referencing the closed pane) would otherwise
+        // persist until an unrelated event.
+        for (&id, pane) in self.pane_store.panes.iter() {
+            if !seen_pane_ids.contains(&id) {
+                changed_tabs.insert(pane.tab_id);
             }
         }
 
@@ -436,8 +494,25 @@ impl ZellijSmartTabsPlugin {
         }
     }
 
-    fn handle_timer(&mut self) {
+    /// Polls panes missing CWD, program, or git data.
+    /// Fallback for panes that existed before the plugin loaded and never received
+    /// CwdChanged/CommandChanged events, and for git repos created after the last
+    /// CWD change (no Zellij event covers `git init` in place).
+    fn poll_missing_pane_data(&mut self) {
         let mut changed_tabs = HashSet::new();
+
+        // Snapshot before the CWD loop below: panes whose CWD gets filled in
+        // this tick already request git info there.
+        let panes_missing_git: Vec<(u32, String)> = self
+            .pane_store
+            .panes
+            .iter()
+            .filter(|(_, p)| p.raw_git_root.is_none())
+            .filter_map(|(&id, p)| p.raw_cwd.clone().map(|cwd| (id, cwd)))
+            .collect();
+        for (pane_id, cwd) in panes_missing_git {
+            self.request_git_info(pane_id, &cwd);
+        }
 
         let panes_missing_cwd: Vec<u32> = self
             .pane_store
@@ -450,12 +525,10 @@ impl ZellijSmartTabsPlugin {
             if let Ok(cwd) = self.host.get_pane_cwd(pane_id) {
                 let cwd_str = cwd.to_string_lossy().to_string();
                 if !cwd_str.is_empty() {
-                    let tab_id = self.pane_store.panes.get(&pane_id).map(|p| p.tab_id);
                     if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
                         debug!(pane_id = pane_id, cwd = cwd_str.as_str(); "cwd polled");
+                        let tab_id = pane.tab_id;
                         pane.set_cwd(cwd_str.clone(), self.home_dir.as_deref());
-                    }
-                    if let Some(tab_id) = tab_id {
                         changed_tabs.insert(tab_id);
                     }
                     self.request_git_info(pane_id, &cwd_str);
@@ -463,55 +536,44 @@ impl ZellijSmartTabsPlugin {
             }
         }
 
-        // Only poll running command for non-command panes.
-        // Command panes have a fixed program from terminal_command.
-        let pane_ids: Vec<u32> = self
+        let panes_missing_program: Vec<u32> = self
             .pane_store
             .panes
             .iter()
-            .filter(|(_, p)| p.terminal_command.is_none())
+            .filter(|(_, p)| p.terminal_command.is_none() && p.program.is_none())
             .map(|(&id, _)| id)
             .collect();
-        for pane_id in pane_ids {
-            let raw_cmd = self.host.get_pane_running_command(pane_id).ok();
-            let running_command = raw_cmd.as_ref().map(|cmd| cmd.join(" "));
-            let raw_program = raw_cmd.and_then(|cmd| {
-                let tokens: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
-                extract_program(&tokens, &self.config().skip_programs)
-            });
-            let new_program = self.substitute_program(raw_program);
-            if let Some(pane) = self.pane_store.panes.get_mut(&pane_id) {
-                pane.running_command = running_command;
-                if pane.program != new_program {
-                    debug!(pane_id = pane_id, program = format!("{:?}", new_program).as_str(); "program changed");
-                    changed_tabs.insert(pane.tab_id);
-                    pane.program = new_program;
-                }
-            }
-
-            // Refresh git info for panes with CWD on auto-managed tabs
-            let should_refresh_git = self.pane_store.panes.get(&pane_id).and_then(|p| {
-                if p.raw_cwd.is_some() {
-                    self.tab_store
-                        .tabs
-                        .get(&p.tab_id)
-                        .filter(|t| t.is_managed)
-                        .map(|_| p.raw_cwd.as_deref().unwrap().to_string())
-                } else {
-                    None
-                }
-            });
-            if let Some(cwd) = should_refresh_git {
-                self.request_git_info(pane_id, &cwd);
+        for pane_id in panes_missing_program {
+            if let Ok(cmd) = self.host.get_pane_running_command(pane_id)
+                && let Some(tab_id) = self.update_pane_program(pane_id, &cmd, "poll")
+            {
+                changed_tabs.insert(tab_id);
             }
         }
 
+        // Runs inside the Timer handler, which re-arms once afterward — queue
+        // without arming so poll-discovered renames don't stack extra timers.
         for tab_id in changed_tabs {
+            self.mark_pending(tab_id);
+        }
+    }
+
+    fn handle_cmd_changed(&mut self, pane_id: u32, command: Vec<String>) {
+        if let Some(tab_id) = self.update_pane_program(pane_id, &command, "event") {
             self.schedule_rename(tab_id);
         }
     }
 
     fn handle_key(&mut self, key: KeyWithModifier) {
+        if self.confirm_reload {
+            self.confirm_reload = false;
+            if key.has_no_modifiers()
+                && matches!(key.bare_key, BareKey::Char('R') | BareKey::Char('y'))
+            {
+                self.host.reload_self();
+            }
+            return;
+        }
         if key.has_no_modifiers() {
             match key.bare_key {
                 BareKey::Char('1') => self.active_view = 0,
@@ -534,6 +596,9 @@ impl ZellijSmartTabsPlugin {
                 BareKey::Char('G') => {
                     self.scroll_offsets[self.active_view] = 10000;
                 }
+                BareKey::Char('R') => {
+                    self.confirm_reload = true;
+                }
                 BareKey::Esc => {
                     self.host.hide_self();
                 }
@@ -541,6 +606,18 @@ impl ZellijSmartTabsPlugin {
             }
         } else if key.bare_key == BareKey::Tab && key.has_modifiers(&[KeyModifier::Shift]) {
             self.active_view = (self.active_view + ui::VIEW_COUNT - 1) % ui::VIEW_COUNT;
+        }
+    }
+
+    /// Bound the Help view's scroll offset to its content for the given viewport
+    /// height. Prevents an over-scroll (e.g. the `G` sentinel) from rendering a
+    /// blank page and keeps the stored offset in step so `k` responds at once.
+    fn clamp_active_scroll(&mut self, rows: usize) {
+        if self.active_view == ui::HELP_VIEW {
+            let content_rows = rows.saturating_sub(2);
+            let max_scroll = ui::help_line_count(self.config()).saturating_sub(content_rows);
+            let offset = &mut self.scroll_offsets[self.active_view];
+            *offset = (*offset).min(max_scroll);
         }
     }
 
@@ -579,7 +656,7 @@ impl ZellijSmartTabsPlugin {
                 self.permissions_granted = true;
                 self.host.hide_self();
                 self.schedule_rename_all();
-                self.schedule_next_timer();
+                self.ensure_heartbeat();
                 true
             }
             Event::TabUpdate(tabs) => {
@@ -590,10 +667,14 @@ impl ZellijSmartTabsPlugin {
                 self.handle_pane_update(manifest);
                 true
             }
-            Event::CwdChanged(pane_id, cwd, _) => {
-                if let PaneId::Terminal(id) = pane_id {
-                    self.handle_cwd_changed(id, cwd);
-                }
+            Event::CwdChanged(PaneId::Terminal(pane_id), cwd, _) => {
+                self.handle_cwd_changed(pane_id, cwd);
+                true
+            }
+            // is_foreground=false carries the shell command after the
+            // foreground command exits — handle both so the program clears.
+            Event::CommandChanged(PaneId::Terminal(pane_id), command, _, _) => {
+                self.handle_cmd_changed(pane_id, command);
                 true
             }
             Event::RunCommandResult(exit_code, stdout, stderr, context) => {
@@ -601,16 +682,17 @@ impl ZellijSmartTabsPlugin {
                 true
             }
             Event::Timer(_) => {
+                // Account for the timer that just fired.
+                self.outstanding_timers = self.outstanding_timers.saturating_sub(1);
                 if self.permissions_granted {
+                    self.poll_missing_pane_data();
                     self.tick_pending_renames();
-                    self.poll_ticks += 1;
-                    if self.pending_renames.is_empty()
-                        || self.poll_ticks >= self.poll_tick_threshold()
-                    {
-                        self.poll_ticks = 0;
-                        self.handle_timer();
-                    }
-                    self.schedule_next_timer();
+                    // Re-arm only when this was the last timer in flight, so a
+                    // heartbeat and a debounce that piled up collapse into one
+                    // chain instead of each spawning a successor. `tick_pending_renames`
+                    // drained the set, so the heart of this branch is exactly
+                    // `ensure_heartbeat`.
+                    self.ensure_heartbeat();
                 }
                 true
             }
@@ -637,17 +719,14 @@ impl ZellijSmartTabsPlugin {
     }
 
     fn set_focused_managed(&mut self, managed: bool) {
-        if let Some(tab_pos) = self.host.get_focused_tab_position() {
-            if let Some(tab_id) = self.tab_store.tab_id_at_position(tab_pos) {
-                if let Some(state) = self.tab_store.tabs.get_mut(&tab_id) {
-                    if state.is_managed != managed {
-                        state.is_managed = managed;
-                        debug!(tab_id = tab_id, managed = managed; "tab management changed");
-                        if managed {
-                            self.schedule_rename(tab_id);
-                        }
-                    }
-                }
+        if let Some(tab_id) = self.host.get_focused_tab_id()
+            && let Some(state) = self.tab_store.tabs.get_mut(&tab_id)
+            && state.is_managed != managed
+        {
+            state.is_managed = managed;
+            debug!(tab_id = tab_id, managed = managed; "tab management changed");
+            if managed {
+                self.schedule_rename(tab_id);
             }
         }
     }
@@ -663,7 +742,7 @@ impl ZellijSmartTabsPlugin {
         let parsed: StatusPayload = match serde_json::from_str(payload) {
             Ok(p) => p,
             Err(e) => {
-                error!(err = format!("{}", e).as_str(); "invalid pane_status payload");
+                error!(err = format!("{}", e).as_str(), payload = payload; "invalid pane_status payload");
                 return;
             }
         };
@@ -747,6 +826,7 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
             EventType::TabUpdate,
             EventType::PaneUpdate,
             EventType::CwdChanged,
+            EventType::CommandChanged,
             EventType::Timer,
             EventType::PermissionRequestResult,
             EventType::RunCommandResult,
@@ -772,6 +852,7 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
             ui::render_version_error(rows, cols, error);
             return;
         }
+        self.clamp_active_scroll(rows);
         ui::render_dashboard(
             rows,
             cols,
@@ -782,6 +863,7 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
                 tab_store: &self.tab_store,
                 pane_store: &self.pane_store,
                 last_rename: &self.last_rename,
+                confirm_reload: self.confirm_reload,
             },
         );
     }
@@ -790,7 +872,7 @@ impl ZellijPlugin for ZellijSmartTabsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use config::Substitutions;
+
     use host::MockZellijHost;
     use mockall::predicate::*;
     fn default_config() -> BTreeMap<String, String> {
@@ -807,12 +889,13 @@ mod tests {
             pane_store: PaneStore::default(),
             permissions_granted: false,
             pending_renames: HashSet::new(),
-            poll_ticks: 0,
+            outstanding_timers: 0,
             active_view: 0,
             scroll_offsets: [0; ui::VIEW_COUNT],
             last_rename: None,
             version_error: None,
             home_dir: None,
+            confirm_reload: false,
         }
     }
 
@@ -951,7 +1034,7 @@ mod tests {
     }
 
     #[test]
-    fn test_timer_fetches_missing_cwd() {
+    fn test_timer_polls_missing_cwd() {
         let mut mock = MockZellijHost::new();
 
         mock.expect_rename_tab()
@@ -962,7 +1045,7 @@ mod tests {
             .with(eq(10u32))
             .returning(|_| Ok(std::path::PathBuf::from("/home/user/fetched-dir")));
         mock.expect_get_pane_running_command()
-            .returning(|_| Ok(vec!["nvim".into(), "src/main.rs".into()]));
+            .returning(|_| Ok(vec![]));
         mock.expect_run_command().returning(|_, _, _, _| ());
         mock.expect_set_timeout().returning(|_| ());
 
@@ -970,7 +1053,6 @@ mod tests {
         plugin.config = Some(Config::from_map(&default_config()));
         plugin.permissions_granted = true;
 
-        // Tab + pane registered but no CWD yet
         plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
         plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
             0,
@@ -978,14 +1060,440 @@ mod tests {
         )])));
         assert!(plugin.pane_store.panes.get(&10).unwrap().cwd.is_none());
 
-        // Timer should fetch CWD and program, scheduling a rename
         plugin.handle_event(Event::Timer(0.0));
         plugin.flush_pending_renames();
 
         let pane = plugin.pane_store.panes.get(&10).unwrap();
-        assert_eq!(pane.cwd, Some("/home/user/fetched-dir".into()));
-        let expected_program = Substitutions::default().program.get("nvim").cloned();
-        assert_eq!(pane.program, expected_program);
+        assert_eq!(pane.cwd.as_deref(), Some("/home/user/fetched-dir"));
+    }
+
+    #[test]
+    fn test_program_tracks_command_changed_foreground_and_exit() {
+        struct Step {
+            label: &'static str,
+            command: Vec<&'static str>,
+            is_foreground: bool,
+            expected_program: Option<&'static str>,
+        }
+
+        // Zellij emits (foreground_cmd, true) when a command starts and
+        // (shell_cmd, false) when it exits back to the shell.
+        let steps = vec![
+            Step {
+                label: "command starts",
+                command: vec!["nvim", "src/main.rs"],
+                is_foreground: true,
+                expected_program: Some("\u{e6ae}"), // default nvim substitution
+            },
+            Step {
+                label: "command exits back to shell",
+                command: vec!["zsh"],
+                is_foreground: false,
+                expected_program: Some("\u{f489}"), // default zsh substitution
+            },
+        ];
+
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        for step in steps {
+            plugin.handle_event(Event::CommandChanged(
+                PaneId::Terminal(10),
+                step.command.iter().map(|s| s.to_string()).collect(),
+                step.is_foreground,
+                vec![],
+            ));
+            assert_eq!(
+                plugin.pane_store.panes.get(&10).unwrap().program.as_deref(),
+                step.expected_program,
+                "{}",
+                step.label
+            );
+        }
+    }
+
+    #[test]
+    fn test_timer_polls_git_for_pane_with_cwd_but_no_git_root() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_get_pane_running_command()
+            .returning(|_| Ok(vec![]));
+        // Once from CwdChanged, once from the timer poll after the first
+        // lookup came back negative (e.g. `git init` ran after the cd).
+        mock.expect_run_command().times(2).returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/not-a-repo"),
+            vec![],
+        ));
+
+        // git rev-parse failed: not a repo (yet)
+        let mut ctx = BTreeMap::new();
+        ctx.insert(CTX_PANE_ID.into(), "10".into());
+        ctx.insert(CTX_COMMAND_TYPE.into(), CMD_GIT_ROOT.into());
+        plugin.handle_event(Event::RunCommandResult(Some(128), vec![], vec![], ctx));
+        assert!(plugin.pane_store.panes.get(&10).unwrap().git_root.is_none());
+
+        // Timer poll must retry git detection for panes with cwd but no git root
+        plugin.handle_event(Event::Timer(0.0));
+    }
+
+    #[test]
+    fn test_tab_renames_when_referenced_pane_closes() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        let mut cfg = default_config();
+        cfg.insert(
+            "format".into(),
+            "{{ short_dir }}{% if pane[1] %} | {{ pane[1].short_dir }}{% endif %}".into(),
+        );
+        plugin.config = Some(Config::from_map(&cfg));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0), pane_info(11, 1, 0)],
+        )])));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/a"),
+            vec![],
+        ));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(11),
+            std::path::PathBuf::from("/home/user/b"),
+            vec![],
+        ));
+        plugin.flush_pending_renames();
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "a | b");
+
+        // Closing the second pane must drop the stale " | b" segment.
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+        plugin.flush_pending_renames();
+        assert_eq!(plugin.tab_store.tabs.get(&1).unwrap().name, "a");
+    }
+
+    #[test]
+    fn test_floating_panes_excluded_from_naming() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+
+        // Floating pane sorts first by x but must not be tracked or named.
+        let tiled = pane_info(10, 5, 0);
+        let mut floating = pane_info(20, 0, 0);
+        floating.is_floating = true;
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![floating, tiled],
+        )])));
+
+        let panes = plugin.pane_store.panes_for_tab(1);
+        assert_eq!(panes.len(), 1, "only the tiled pane is tracked");
+        assert_eq!(panes[0].pane_id, 10);
+        assert!(
+            plugin.pane_store.panes.get(&20).is_none(),
+            "floating pane is not stored"
+        );
+    }
+
+    #[test]
+    fn test_help_scroll_clamps_and_stays_navigable() {
+        let mut mock = MockZellijHost::new();
+        mock.expect_set_timeout().returning(|_| ());
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.active_view = ui::HELP_VIEW;
+
+        let rows = 10;
+        let content_rows = rows - 2;
+        let expected_max = ui::help_line_count(plugin.config()).saturating_sub(content_rows);
+        assert!(expected_max > 0, "help content must overflow a 10-row pane");
+
+        // `G` sets a large sentinel; clamp must bound it to the real maximum so
+        // the page is never blank.
+        plugin.handle_event(Event::Key(KeyWithModifier::new(BareKey::Char('G'))));
+        assert_eq!(plugin.scroll_offsets[ui::HELP_VIEW], 10000);
+        plugin.clamp_active_scroll(rows);
+        assert_eq!(
+            plugin.scroll_offsets[ui::HELP_VIEW], expected_max,
+            "G clamps to the last full page"
+        );
+
+        // `k` from the clamped bottom moves up exactly one line (not stuck).
+        plugin.handle_event(Event::Key(KeyWithModifier::new(BareKey::Char('k'))));
+        assert_eq!(plugin.scroll_offsets[ui::HELP_VIEW], expected_max - 1);
+
+        // `g` returns to the top.
+        plugin.handle_event(Event::Key(KeyWithModifier::new(BareKey::Char('g'))));
+        assert_eq!(plugin.scroll_offsets[ui::HELP_VIEW], 0);
+    }
+
+    #[test]
+    fn test_permission_grant_arms_single_timer() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut mock = MockZellijHost::new();
+        mock.expect_hide_self().returning(|| ());
+        let c = count.clone();
+        mock.expect_set_timeout().returning(move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+        });
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+
+        // A managed tab exists but nothing is pending or armed yet.
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "no timers armed before permission grant"
+        );
+
+        // The grant must arm exactly one timer, not one per source (rename batch
+        // + heartbeat). The old code armed two.
+        plugin.handle_event(Event::PermissionRequestResult(PermissionStatus::Granted));
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "permission grant arms exactly one timer"
+        );
+        assert_eq!(plugin.outstanding_timers, 1);
+    }
+
+    #[test]
+    fn test_idle_event_arms_debounce_not_poll_interval() {
+        use std::sync::{Arc, Mutex};
+
+        let intervals = Arc::new(Mutex::new(Vec::<f64>::new()));
+        let mut mock = MockZellijHost::new();
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+        mock.expect_get_pane_running_command()
+            .returning(|_| Ok(vec![]));
+        let iv = intervals.clone();
+        mock.expect_set_timeout().returning(move |secs| {
+            iv.lock().unwrap().push(secs);
+        });
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/p"),
+            vec![],
+        ));
+        // Drain to the idle state: a poll-interval heartbeat is outstanding.
+        plugin.handle_event(Event::Timer(0.0));
+        assert_eq!(
+            *intervals.lock().unwrap().last().unwrap(),
+            5.0,
+            "idle heartbeat uses poll_interval"
+        );
+
+        // An event while idle must arm a debounce immediately so the rename
+        // applies in ~0.2s, not up to poll_interval later.
+        plugin.handle_event(Event::CwdChanged(
+            PaneId::Terminal(10),
+            std::path::PathBuf::from("/home/user/moved"),
+            vec![],
+        ));
+        assert_eq!(
+            *intervals.lock().unwrap().last().unwrap(),
+            0.2,
+            "event while idle arms a debounce timer, not another poll_interval"
+        );
+    }
+
+    #[test]
+    fn test_timers_stay_bounded_under_event_storm() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut mock = MockZellijHost::new();
+        mock.expect_rename_tab().returning(|_, _| ());
+        mock.expect_run_command().returning(|_, _, _, _| ());
+        mock.expect_get_pane_cwd()
+            .returning(|_| Ok(std::path::PathBuf::from("/home/user/p")));
+        mock.expect_get_pane_running_command()
+            .returning(|_| Ok(vec![]));
+        let c = count.clone();
+        mock.expect_set_timeout().returning(move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+        });
+
+        let mut plugin = make_plugin(mock);
+        plugin.config = Some(Config::from_map(&default_config()));
+        plugin.permissions_granted = true;
+
+        plugin.handle_event(Event::TabUpdate(vec![tab_info(1, 0, "Tab #1")]));
+        plugin.handle_event(Event::PaneUpdate(pane_manifest(vec![(
+            0,
+            vec![pane_info(10, 0, 0)],
+        )])));
+
+        // Alternate an event and a timer tick many times. Each event may arm a
+        // debounce while a heartbeat is mid-flight, but the two must collapse —
+        // the count can never grow with the number of events.
+        for i in 0..50 {
+            plugin.handle_event(Event::CwdChanged(
+                PaneId::Terminal(10),
+                std::path::PathBuf::from(format!("/home/user/d{i}")),
+                vec![],
+            ));
+            assert!(
+                plugin.outstanding_timers <= 2,
+                "timers bounded after event (iter {i}): {}",
+                plugin.outstanding_timers
+            );
+            plugin.handle_event(Event::Timer(0.0));
+            assert!(
+                plugin.outstanding_timers <= 2,
+                "timers bounded after tick (iter {i}): {}",
+                plugin.outstanding_timers
+            );
+        }
+
+        // A final idle tick collapses back to a single heartbeat timer.
+        plugin.handle_event(Event::Timer(0.0));
+        assert_eq!(
+            plugin.outstanding_timers, 1,
+            "collapses to one timer when idle"
+        );
+        // Total arms scale ~linearly with events (one debounce each), not with
+        // an ever-growing set of self-sustaining chains.
+        assert!(
+            count.load(Ordering::SeqCst) <= 60,
+            "no runaway timer growth: {}",
+            count.load(Ordering::SeqCst)
+        );
+    }
+
+    #[test]
+    fn test_set_focused_managed_targets_by_tab_id_not_position() {
+        // tab_id and position diverge once tabs are closed/reordered.
+        // The focused-tab lookup must use the stable tab_id returned by
+        // get_focused_pane_info, not treat it as a position.
+        struct Case {
+            label: &'static str,
+            pipe: &'static str,
+            focused_tab_id: usize,
+            initial_managed: bool,
+            expected_managed: bool,
+        }
+
+        let cases = vec![
+            Case {
+                label: "manual on tab whose id != position",
+                pipe: PIPE_SET_MANUAL,
+                focused_tab_id: 6,
+                initial_managed: true,
+                expected_managed: false,
+            },
+            Case {
+                label: "managed restore on tab whose id != position",
+                pipe: PIPE_SET_MANAGED,
+                focused_tab_id: 6,
+                initial_managed: false,
+                expected_managed: true,
+            },
+        ];
+
+        for case in cases {
+            let mut mock = MockZellijHost::new();
+            mock.expect_set_timeout().returning(|_| ());
+            mock.expect_rename_tab().returning(|_, _| ());
+            mock.expect_run_command().returning(|_, _, _, _| ());
+            let focused = case.focused_tab_id;
+            mock.expect_get_focused_tab_id()
+                .returning(move || Some(focused));
+
+            let mut plugin = make_plugin(mock);
+            plugin.config = Some(Config::from_map(&default_config()));
+            plugin.permissions_granted = true;
+
+            // Tabs 5 and 6 sit at positions 0 and 1 — ids never equal positions.
+            plugin.handle_event(Event::TabUpdate(vec![
+                tab_info(5, 0, "Tab #1"),
+                tab_info(6, 1, "Tab #2"),
+            ]));
+            plugin
+                .tab_store
+                .tabs
+                .get_mut(&case.focused_tab_id)
+                .unwrap()
+                .is_managed = case.initial_managed;
+
+            plugin.handle_pipe(PipeMessage {
+                source: PipeSource::Cli(String::new()),
+                name: case.pipe.into(),
+                payload: None,
+                args: std::collections::BTreeMap::new(),
+                is_private: true,
+            });
+
+            assert_eq!(
+                plugin.tab_store.tabs.get(&6).unwrap().is_managed,
+                case.expected_managed,
+                "{}: focused tab",
+                case.label
+            );
+            // The non-focused tab must be untouched.
+            assert!(
+                plugin.tab_store.tabs.get(&5).unwrap().is_managed,
+                "{}: non-focused tab unchanged",
+                case.label
+            );
+        }
     }
 
     #[test]
@@ -1045,7 +1553,7 @@ mod tests {
 
     #[test]
     fn test_version_check_passes() {
-        assert!(parse_semver("0.44.0").unwrap() >= MIN_ZELLIJ_VERSION);
+        assert!(parse_semver("0.44.2").unwrap() >= MIN_ZELLIJ_VERSION);
         assert!(parse_semver("0.45.0").unwrap() >= MIN_ZELLIJ_VERSION);
         assert!(parse_semver("1.0.0").unwrap() >= MIN_ZELLIJ_VERSION);
     }
@@ -1290,7 +1798,10 @@ mod tests {
         assert_eq!(pane.on_focus, Some("idle".into()));
     }
 
-    fn make_plugin_with_home(mock: MockZellijHost, home_dir: Option<String>) -> ZellijSmartTabsPlugin {
+    fn make_plugin_with_home(
+        mock: MockZellijHost,
+        home_dir: Option<String>,
+    ) -> ZellijSmartTabsPlugin {
         let mut plugin = make_plugin(mock);
         plugin.home_dir = home_dir;
         plugin
@@ -1331,9 +1842,21 @@ mod tests {
         ));
 
         let pane = plugin.pane_store.panes.get(&10).unwrap();
-        assert_eq!(pane.git_root.as_deref(), Some("~/project"), "git_root display");
-        assert_eq!(pane.raw_git_root.as_deref(), Some("/home/user/project"), "raw_git_root");
-        assert_eq!(pane.short_git_root.as_deref(), Some("project"), "short_git_root");
+        assert_eq!(
+            pane.git_root.as_deref(),
+            Some("~/project"),
+            "git_root display"
+        );
+        assert_eq!(
+            pane.raw_git_root.as_deref(),
+            Some("/home/user/project"),
+            "raw_git_root"
+        );
+        assert_eq!(
+            pane.short_git_root.as_deref(),
+            Some("project"),
+            "short_git_root"
+        );
     }
 
     #[test]
@@ -1407,9 +1930,24 @@ mod tests {
             plugin.flush_pending_renames();
 
             let pane = plugin.pane_store.panes.get(&10).unwrap();
-            assert_eq!(pane.cwd.as_deref(), Some(case.expected_cwd), "{}: cwd", case.label);
-            assert_eq!(pane.raw_cwd.as_deref(), Some(case.expected_raw_cwd), "{}: raw_cwd", case.label);
-            assert_eq!(pane.short_dir.as_deref(), Some(case.expected_short_dir), "{}: short_dir", case.label);
+            assert_eq!(
+                pane.cwd.as_deref(),
+                Some(case.expected_cwd),
+                "{}: cwd",
+                case.label
+            );
+            assert_eq!(
+                pane.raw_cwd.as_deref(),
+                Some(case.expected_raw_cwd),
+                "{}: raw_cwd",
+                case.label
+            );
+            assert_eq!(
+                pane.short_dir.as_deref(),
+                Some(case.expected_short_dir),
+                "{}: short_dir",
+                case.label
+            );
         }
     }
 }

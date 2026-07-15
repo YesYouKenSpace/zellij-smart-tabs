@@ -14,7 +14,7 @@ Single Rust WASM plugin with two data stores, a MiniJinja template engine, and a
 │                                                      │
 │  ┌────────────┐  ┌────────────┐  ┌────────────────┐ │
 │  │  Event      │  │  Template  │  │  Dashboard UI  │ │
-│  │  Handler    │→ │  Engine    │  │  (5 views)     │ │
+│  │  Handler    │→ │  Engine    │  │  (4 views)     │ │
 │  │            │  │ (MiniJinja)│  │                │ │
 │  │ TabUpdate   │  └────────────┘  └────────────────┘ │
 │  │ PaneUpdate  │                                     │
@@ -102,12 +102,13 @@ Program and status values are mapped through `Substitutions` before entering the
 ## Event Flow
 
 1. **`TabUpdate`** — sync `TabStore` (new tabs, closed tabs, position changes). New tabs are scheduled for rename.
-2. **`PaneUpdate`** — sync `PaneStore` (positions, terminal_command for command panes). Panes removed from manifest are cleaned up.
+2. **`PaneUpdate`** — sync `PaneStore` (positions, terminal_command for command panes, `on_focus`). Tiled panes only; floating panes are excluded. Tabs that gain, lose, or change a pane are scheduled for rename.
 3. **`CwdChanged`** — update `PaneState.cwd` and `short_dir`, request git info via `run_command`.
-4. **`RunCommandResult`** — update `PaneState.git_root` and `short_git_root` from `git rev-parse --show-toplevel` result.
-5. **`Timer`** — debounce tick (0.2s): fire pending renames. Poll tick (5s): refresh CWD, program, and git info for all panes.
-6. **`Key`/`Mouse`** — dashboard navigation.
-7. **`Pipe`** — `set_focused_to_manual`, `set_focused_to_managed`, `pane_status`.
+4. **`CommandChanged`** — update `PaneState.program` from the foreground command; on exit (`is_foreground = false`) it carries the shell command, so the program reverts.
+5. **`RunCommandResult`** — update `PaneState.git_root` and `short_git_root` from `git rev-parse --show-toplevel` result.
+6. **`Timer`** — drain pending renames, then poll panes still missing CWD/program/git as a fallback, then re-arm the single timer (see Debounce & Polling).
+7. **`Key`/`Mouse`** — dashboard navigation.
+8. **`Pipe`** — `set_focused_to_manual`, `set_focused_to_managed`, `pane_status`.
 
 ## Manual Tab Control
 
@@ -121,25 +122,45 @@ No automatic detection of manual renames — the user explicitly opts out via pi
 
 ## Debounce & Polling
 
-The timer fires at `debounce` interval (default 0.2s). Two mechanisms ride on it:
+The plugin is event-driven; a bounded timer chain provides debouncing and a
+low-frequency fallback poll. Zellij's `set_timeout` cannot be cancelled or
+deduplicated — every call yields exactly one future `Timer` event — so arming
+one per event would leak timer chains for the life of the session.
 
-1. **Rename debounce** — `pending_renames: HashSet<usize>` collects tab IDs. Each tick drains the set and renames all pending tabs. Multiple events within one tick coalesce.
+The plugin counts in-flight timers (`outstanding_timers`). The `Timer` handler
+re-arms **only when the count reaches zero**, so a heartbeat and a debounce
+timer that piled up collapse back into a single chain rather than each spawning
+a successor. The count is bounded at 2 (one heartbeat + one debounce).
 
-2. **Poll cycle** — `poll_ticks` counter increments each tick. When it reaches `poll_interval / debounce`, a full poll runs: refresh CWD (via `get_pane_cwd`), program (via `get_pane_running_command`), and git info (via `run_command`) for all panes.
+1. **Rename debounce** — `pending_renames: HashSet<usize>` collects tab IDs.
+   Each `Timer` tick drains the set and renames all pending tabs, so multiple
+   events within one interval coalesce into a single rename. An event arms a
+   `debounce` timer (default 0.2s) immediately when a batch starts, so renames
+   apply promptly instead of waiting for the idle heartbeat.
+
+2. **Idle heartbeat** — when nothing is pending, the chain re-arms at
+   `poll_interval` (default 5s).
+
+3. **Fallback poll** — each tick, `poll_missing_pane_data` refreshes panes still
+   missing CWD (via `get_pane_cwd`), program (via `get_pane_running_command`),
+   or git root (via `run_command`). This recovers panes that existed before the
+   plugin loaded (and so missed their events) and git repos created in place
+   after a `cd` (no Zellij event covers `git init`).
 
 ## Dashboard UI
 
-Five views rendered in the plugin pane via Zellij's `ui_components` API:
+Four views rendered in the plugin pane via Zellij's `ui_components` API:
 
 | View | Content |
 |---|---|
 | Status | Plugin version, format, poll interval, debug |
 | Tabs | Table of all tabs: position, name, CWD, git root, program, managed |
 | Panes | Table of all panes: tab, position, CWD, git root, program, status |
-| Log | Debug log ring buffer (100 entries, `debug "true"` required) |
 | Help | Template variables, keyboard shortcuts, config reference |
 
-Navigation: `1-5` jump, `Tab`/`Shift+Tab` cycle, `j/k` scroll, `g/G` top/bottom, `Esc` hide, mouse click/scroll.
+Debug output goes to Zellij's log as JSON (`debug "true"`); there is no in-plugin Log view.
+
+Navigation: `1-4` jump, `Tab`/`Shift+Tab` cycle, `j/k` scroll, `g/G` top/bottom, `Esc` hide, mouse click/scroll.
 
 ## Testability
 
