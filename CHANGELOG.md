@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-17
+
+> Re-release of v0.2.2 with corrected `Cargo.toml` version and `CHANGELOG.md` entries. v0.2.2 was tagged without bumping the package version from `0.2.1` and without updating this changelog; since the v0.2.2 tag is immutable, the same commits are re-released as v0.2.3.
+
+- feat: event-driven triggers for tab name changes (#22)
 - feat: simplify `$HOME` path to `~` in tab names and dashboard display (#17)
 - fix: `on_focus` only triggers when both pane and tab are focused, preventing false triggers on background tabs (#16)
+- fix: clippy `too_many_arguments` lint (#15)
+
+### Notes
+
+- **Requires Zellij 0.44.2+** — uses the `CommandChanged` event (added in 0.44.2) and the `CwdChanged` event / stable `tab_id` API (added in 0.44.0). Upgrade Zellij before installing this version.
 
 ## [0.2.1] - 2026-04-30
 

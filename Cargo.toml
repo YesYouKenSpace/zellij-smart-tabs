@@ -1,6 +1,6 @@
 [package]
 name = "zellij-smart-tabs"
-version = "0.2.1"
+version = "0.2.3"
 edition = "2024"
 description = "A Zellij plugin that auto-renames tabs using configurable templates"
 repository = "https://github.com/yesyouken/zellij-smart-tabs"
