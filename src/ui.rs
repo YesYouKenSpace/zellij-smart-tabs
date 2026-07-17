@@ -3,6 +3,8 @@ use crate::tab_state::{PaneStore, TabStore};
 use zellij_tile::prelude::*;
 
 pub const VIEW_COUNT: usize = 4;
+/// Index of the Help view — the only view whose content scrolls.
+pub const HELP_VIEW: usize = 3;
 
 fn nonempty(s: &str) -> &str {
     if s.is_empty() {
@@ -22,6 +24,7 @@ pub struct DashboardContext<'a> {
     pub tab_store: &'a TabStore,
     pub pane_store: &'a PaneStore,
     pub last_rename: &'a Option<String>,
+    pub confirm_reload: bool,
 }
 
 pub fn render_dashboard(rows: usize, cols: usize, ctx: &DashboardContext) {
@@ -40,7 +43,11 @@ pub fn render_dashboard(rows: usize, cols: usize, ctx: &DashboardContext) {
         _ => {}
     }
 
-    render_shortcuts(rows, cols);
+    if ctx.confirm_reload {
+        render_confirm_reload(rows, cols);
+    } else {
+        render_shortcuts(rows, cols);
+    }
 }
 
 fn render_tab_bar(active_view: usize) {
@@ -168,11 +175,13 @@ fn render_panes(rows: usize, cols: usize, tab_store: &TabStore, pane_store: &Pan
     print_table_with_coordinates(table, 0, 1, Some(cols), Some(rows));
 }
 
-fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
+/// Build the Help view content. Kept separate from rendering so the scroll
+/// bound can be derived from the same line set (see [`help_line_count`]).
+fn help_lines(config: &Config) -> Vec<Text> {
     let mut lines: Vec<Text> = Vec::new();
 
     lines.push(Text::new("Template Variables").color_all(0));
-    lines.push(Text::new("Top-level (aliases for pane['0'].*)").dim_all());
+    lines.push(Text::new("Top-level (aliases for pane[0].*)").dim_all());
     lines.push(Text::new("  {{ short_dir }}       Last component of CWD"));
     lines.push(Text::new(
         "  {{ cwd }}             Full working directory path",
@@ -186,12 +195,12 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
     lines.push(Text::new("  {{ program }}         Running program name"));
     lines.push(Text::new(" "));
     lines.push(Text::new("Pane-scoped access:").dim_all());
-    lines.push(Text::new("  {{ pane.last.program }}         Last pane"));
-    lines.push(Text::new("  {{ pane['0'].short_dir }}       First pane"));
-    lines.push(Text::new("  {{ pane['1'].short_dir }}       Second pane"));
+    lines.push(Text::new("  {{ pane[0].short_dir }}       First pane"));
+    lines.push(Text::new("  {{ pane[1].short_dir }}       Second pane"));
+    lines.push(Text::new("  {{ pane[-1].program }}       Last pane"));
     lines.push(Text::new(" "));
     lines.push(Text::new("Keyboard Shortcuts").color_all(0));
-    lines.push(Text::new("  1-5         Switch view"));
+    lines.push(Text::new("  1-4         Switch view"));
     lines.push(Text::new("  Tab         Next view"));
     lines.push(Text::new("  j / Down    Scroll down"));
     lines.push(Text::new("  k / Up      Scroll up"));
@@ -212,6 +221,21 @@ fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
         "  debug:         Enable debug logging (current: {})",
         config.debug
     )));
+    lines
+}
+
+/// Number of lines in the Help view, used to bound scrolling.
+pub fn help_line_count(config: &Config) -> usize {
+    help_lines(config).len()
+}
+
+fn render_help(rows: usize, cols: usize, scroll: usize, config: &Config) {
+    let lines = help_lines(config);
+    // Defensive guard: `clamp_active_scroll` in main.rs already bounds the
+    // stored offset against the viewport before this is called, so the normal
+    // path is a no-op here. Tighten against the bare line count so direct
+    // callers (tests) cannot render a blank page.
+    let scroll = scroll.min(lines.len().saturating_sub(1));
     for (i, line) in lines.iter().skip(scroll).take(rows).enumerate() {
         print_text_with_coordinates(line.clone(), 0, 1 + i, Some(cols), None);
     }
@@ -221,12 +245,14 @@ pub fn render_version_error(rows: usize, cols: usize, error: &str) {
     if rows < 3 || cols < 10 {
         return;
     }
+    let (major, minor, patch) = crate::MIN_ZELLIJ_VERSION;
+    let upgrade_line = format!("Please upgrade Zellij to {major}.{minor}.{patch} or later.");
     let lines = [
         "zellij-smart-tabs",
         "",
         error,
         "",
-        "Please upgrade Zellij to 0.44.0 or later.",
+        upgrade_line.as_str(),
         "https://zellij.dev/documentation/installation",
     ];
     for (i, line) in lines.iter().take(rows).enumerate() {
@@ -242,9 +268,20 @@ pub fn render_version_error(rows: usize, cols: usize, error: &str) {
 }
 
 fn render_shortcuts(rows: usize, cols: usize) {
-    let shortcuts = "1-5:View  Tab:Next  j/k:Scroll  g/G:Top/Bot  Esc:Hide";
+    let shortcuts = "1-4:View  Tab:Next  j/k:Scroll  g/G:Top/Bot  R:Reload  Esc:Hide";
     print_text_with_coordinates(
         Text::new(shortcuts).dim_all(),
+        0,
+        rows.saturating_sub(1),
+        Some(cols),
+        None,
+    );
+}
+
+fn render_confirm_reload(rows: usize, cols: usize) {
+    let prompt = "Reload plugin? (R/y to confirm, any other key to cancel)";
+    print_text_with_coordinates(
+        Text::new(prompt).color_range(3, 0..prompt.len()),
         0,
         rows.saturating_sub(1),
         Some(cols),

@@ -13,7 +13,7 @@ I built this because I kept losing track of which tab was which. I wanted to gla
 - **Smart renaming** - auto-renames tabs based on configurable Jinja2-like templates (powered by MiniJinja) with context-aware variables (`short_dir`, `short_git_root`, `program`)
 - **Pane-scoped templates** - reference specific panes in templates (`pane[0].*`, `pane[-1].*`) powered by MiniJinja
 - **Manual tab control** - toggle a tab to manual mode to prevent auto-renaming, then rename it yourself. Clear the tab name to restore auto-management.
-- **Dashboard UI** - tabbed dashboard (Status, Tabs, Panes, Log, Help) with keyboard and mouse navigation
+- **Dashboard UI** - tabbed dashboard (Status, Tabs, Panes, Help) with keyboard and mouse navigation
 - **Configurable polling** - reacts to Zellij events (TabUpdate, PaneUpdate, CwdChanged) with a timer fallback
 
 ## Installation
@@ -44,7 +44,7 @@ make install
 
 ### Prerequisites
 
-- **[Zellij](https://zellij.dev/) 0.44.0+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0
+- **[Zellij](https://zellij.dev/) 0.44.2+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0, and the `CommandChanged` event introduced in 0.44.2
 - **[Nerd Font](https://www.nerdfonts.com/)** - the default substitutions use Nerd Font icons. Install one from [nerdfonts.com](https://www.nerdfonts.com/font-downloads) and configure your terminal to use it. Without a Nerd Font, icons will appear as missing glyphs.
 
 ## Quickstart
@@ -72,7 +72,7 @@ All configuration is inline in the plugin block.
 | `format` | String | See [Format Gallery](#format-gallery) | Tab name template (Jinja2-like syntax) |
 | `poll_interval` | Number (seconds) | `5` | Timer fallback interval for polling |
 | `debounce` | Number (seconds) | `0.2` | Delay before applying tab rename after data changes |
-| `debug` | Bool | `true` | Enable debug logging to Zellij log |
+| `debug` | Bool | `false` | Enable debug logging to Zellij log |
 | `sub` | Block | - | Substitution rules (see below) |
 
 ### Substitutions
@@ -145,7 +145,7 @@ A collection of format strings for different workflows. Copy one into your plugi
 
 ```kdl
 // Default - IDE-style: project + file context + status
-format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %} \u{eab6} {{ program }}{% endif %}{% if status %} | {{ status }}{% endif %}"
+format "{% if short_git_root %}{{ short_git_root }}{% else %}{{ short_dir }}{% endif %}{% if program %}\u{eab6} {{ program }}{% endif %}{% if status %} | {{ status }}{% endif %}"
 // => my-repo › nvim | ✅
 
 // Minimal - just the directory name
@@ -253,19 +253,34 @@ Add this to your Claude Code settings (`.claude/settings.json` or global setting
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}'"]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"running\"}'"
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"pending\"}'"]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"pending\"}'"
+          }
+        ]
       }
     ],
     "Stop": [
       {
         "matcher": "",
-        "hooks": ["zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}'"]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zellij pipe --plugin smart-tabs --name pane_status -- '{\"pane_id\":\"'$ZELLIJ_PANE_ID'\",\"status\":\"done\"}'"
+          }
+        ]
       }
     ]
   }
@@ -287,14 +302,15 @@ The plugin pane shows a tabbed dashboard with keyboard and mouse navigation.
 | `1` | Status | Plugin version, format template, config values |
 | `2` | Tabs | Table of all tabs with position, name, CWD, git root, program, status |
 | `3` | Panes | Table of all panes across all tabs |
-| `4` | Log | Debug log entries (enable with `debug "true"`) |
-| `5` | Help | Template variables, keyboard shortcuts, config reference |
+| `4` | Help | Template variables, keyboard shortcuts, config reference |
+
+Debug logging is written to Zellij's log as JSON (enable with `debug "true"`); there is no in-plugin Log view.
 
 ### Keyboard shortcuts
 
 | Key | Action |
 |---|---|
-| `1`-`5` | Switch view |
+| `1`-`4` | Switch view |
 | `Tab` / `Shift+Tab` | Next / previous view |
 | `j` / `Down` | Scroll down |
 | `k` / `Up` | Scroll up |

@@ -85,11 +85,11 @@ impl Config {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        if let Some(raw) = map.get("skip_programs") {
-            if let Ok(doc) = raw.parse::<kdl::KdlDocument>() {
-                for node in doc.nodes() {
-                    skip_programs.insert(node.name().to_string());
-                }
+        if let Some(raw) = map.get("skip_programs")
+            && let Ok(doc) = raw.parse::<kdl::KdlDocument>()
+        {
+            for node in doc.nodes() {
+                skip_programs.insert(node.name().to_string());
             }
         }
 
@@ -130,14 +130,13 @@ fn parse_substitutions(raw: &str) -> Substitutions {
     };
 
     for (section_name, map) in [("program", &mut subs.program), ("status", &mut subs.status)] {
-        if let Some(node) = doc.get(section_name) {
-            if let Some(children) = node.children() {
-                for child in children.nodes() {
-                    let key = child.name().to_string();
-                    if let Some(value) = child.entries().first().and_then(|e| e.value().as_string())
-                    {
-                        map.insert(key, value.to_string());
-                    }
+        if let Some(node) = doc.get(section_name)
+            && let Some(children) = node.children()
+        {
+            for child in children.nodes() {
+                let key = child.name().to_string();
+                if let Some(value) = child.entries().first().and_then(|e| e.value().as_string()) {
+                    map.insert(key, value.to_string());
                 }
             }
         }

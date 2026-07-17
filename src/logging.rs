@@ -25,6 +25,10 @@ impl Log for PluginLogger {
         }
         let mut map = serde_json::Map::new();
         map.insert(
+            "src".into(),
+            serde_json::Value::String("zellij-smart-tabs".into()),
+        );
+        map.insert(
             "level".into(),
             serde_json::Value::String(record.level().as_str().into()),
         );

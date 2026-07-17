@@ -18,7 +18,9 @@ pub trait ZellijHost {
     fn get_pane_cwd(&self, pane_id: u32) -> Result<PathBuf, String>;
     fn get_pane_running_command(&self, pane_id: u32) -> Result<Vec<String>, String>;
     fn hide_self(&self);
-    fn get_focused_tab_position(&self) -> Option<usize>;
+    fn reload_self(&self);
+    /// Returns the stable `tab_id` of the client's focused tab (not its position).
+    fn get_focused_tab_id(&self) -> Option<usize>;
 }
 
 #[cfg(not(test))]
@@ -59,9 +61,17 @@ impl ZellijHost for RealZellijHost {
         zellij_tile::prelude::hide_self();
     }
 
-    fn get_focused_tab_position(&self) -> Option<usize> {
+    fn reload_self(&self) {
+        let plugin_id = zellij_tile::prelude::get_plugin_ids().plugin_id;
+        zellij_tile::prelude::reload_plugin_with_id(plugin_id);
+    }
+
+    fn get_focused_tab_id(&self) -> Option<usize> {
+        // The first tuple element is the focused tab's stable id (the value
+        // stored in Zellij's `active_tab_ids` map), despite the `tab_index`
+        // name in the API — it is `tab.id`, not the tab position.
         zellij_tile::prelude::get_focused_pane_info()
             .ok()
-            .map(|(tab_index, _)| tab_index)
+            .map(|(tab_id, _)| tab_id)
     }
 }
