@@ -36,5 +36,8 @@ clean-cache:
 logs:
 	cat /tmp/zellij-1001/zellij-log/zellij.log  | grep smart-tabs
 
+clear-zellij-logs:
+	rm /tmp/zellij-1001/zellij-log/zellij.log
+
 flogs:
 	tail -f /tmp/zellij-1001/zellij-log/zellij.log | grep --line-buffered smart-tabs
