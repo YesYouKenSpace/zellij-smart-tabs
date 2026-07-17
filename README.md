@@ -4,11 +4,11 @@
 
 A [Zellij](https://github.com/zellij-org/zellij) plugin that manages your tabs so that you don't have to.
 
-## Objective
+## 0. Objective
 
 I built this because I kept losing track of which tab was which. I wanted to glance at my tab bar and instantly know what's running where - without manually renaming tabs every time I switch projects or start a new tool. Now my tabs just tell me what I need to know.
 
-## Features
+## 1. Features
 
 - **Smart renaming** - auto-renames tabs based on configurable Jinja2-like templates (powered by MiniJinja) with context-aware variables (`short_dir`, `short_git_root`, `program`)
 - **Pane-scoped templates** - reference specific panes in templates (`pane[0].*`, `pane[-1].*`) powered by MiniJinja
@@ -16,18 +16,24 @@ I built this because I kept losing track of which tab was which. I wanted to gla
 - **Dashboard UI** - tabbed dashboard (Status, Tabs, Panes, Help) with keyboard and mouse navigation
 - **Configurable polling** - reacts to Zellij events (TabUpdate, PaneUpdate, CwdChanged) with a timer fallback
 
-## Installation
+## 2. Installation
 
-### Download from releases
+### 2.1. Prerequisites
 
-Download the latest `zellij-smart-tabs.wasm` from [GitHub Releases](https://github.com/yesyouken/zellij-smart-tabs/releases) and place it in your Zellij plugins directory:
+- **[Zellij](https://zellij.dev/) 0.44.2+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0, and the `CommandChanged` event introduced in 0.44.2
+- **[Nerd Font](https://www.nerdfonts.com/)** - the default substitutions use Nerd Font icons. Install one from [nerdfonts.com](https://www.nerdfonts.com/font-downloads) and configure your terminal to use it. Without a Nerd Font, icons will appear as missing glyphs.
 
-```bash
-mkdir -p ~/.config/zellij/plugins
-cp zellij-smart-tabs.wasm ~/.config/zellij/plugins/
+### 2.1. Install by Zellij Plugin Manager direcly (Easiest and fastest)
+Replace `v0.2.4` with the latest version
+```kdl
+plugins {
+    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.2.4/zellij-smart-tabs.wasm" {
+        // where config for the plugin should go
+    }
+}
 ```
 
-### Build from source
+### 2.2. Build from source
 
 Requires Rust with the `wasm32-wasip1` target:
 
@@ -42,18 +48,15 @@ make build
 make install
 ```
 
-### Prerequisites
 
-- **[Zellij](https://zellij.dev/) 0.44.2+** - requires the `CwdChanged` event and stable `tab_id` API introduced in 0.44.0, and the `CommandChanged` event introduced in 0.44.2
-- **[Nerd Font](https://www.nerdfonts.com/)** - the default substitutions use Nerd Font icons. Install one from [nerdfonts.com](https://www.nerdfonts.com/font-downloads) and configure your terminal to use it. Without a Nerd Font, icons will appear as missing glyphs.
 
-## Quickstart
+## 3. Quickstart
 
-Alias the plugin and load the plugin on startup. Replace `v0.1.0` with the latest version
+Alias the plugin and load the plugin on startup. Replace `v0.2.4` with the latest version
 
 ```kdl
 plugins {
-    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.1.0/zellij-smart-tabs.wasm" {
+    smart-tabs location="https://github.com/YesYouKenSpace/zellij-smart-tabs/releases/download/v0.2.4/zellij-smart-tabs.wasm" {
         // where config for the plugin should go
     }
 }
@@ -63,7 +66,7 @@ load_plugins {
 }
 ```
 
-## Configuration
+## 4. Configuration
 
 All configuration is inline in the plugin block.
 
@@ -75,7 +78,7 @@ All configuration is inline in the plugin block.
 | `debug` | Bool | `false` | Enable debug logging to Zellij log |
 | `sub` | Block | - | Substitution rules (see below) |
 
-### Substitutions
+### 4.1. Substitutions
 
 Map program names to custom display names using the `sub` block:
 
@@ -97,7 +100,7 @@ plugins {
 
 The `{{ program }}` template variable will show the substituted value. Programs not in the substitution map keep their original name. Use an empty string `""` to hide a program from the tab name.
 
-#### Default program substitutions
+#### 4.1.1. Default program substitutions
 
 | Program | Substitution | Unicode |
 |---|---|---|
@@ -108,7 +111,7 @@ The `{{ program }}` template variable will show the substituted value. Programs 
 | `zsh` |  | `\u{f489}` |
 | `go` | | `\u{e627}` |
 
-#### Default status substitutions
+#### 4.1.2. Default status substitutions
 
 | Status | Substitution | Unicode |
 |---|---|---|
@@ -120,7 +123,7 @@ The `{{ program }}` template variable will show the substituted value. Programs 
 
 These are [Nerd Font](https://www.nerdfonts.com/) icons. Make sure your terminal uses a Nerd Font for them to render correctly. Override any substitution in the `sub` block.
 
-### Template variables
+### 4.2. Template variables
 
 | Variable | Type | Description |
 |---|---|---|
@@ -138,7 +141,7 @@ All variables are also available scoped to specific panes:
 
 Top-level variables (e.g., `{{ short_dir }}`) are aliases for `pane[0].*` (first pane).
 
-### Format Gallery
+### 4.3. Format Gallery
 
 <!-- NOTE: KEEP IN SYNC with tests in src/config.rs -->
 A collection of format strings for different workflows. Copy one into your plugin config:
@@ -174,7 +177,7 @@ format "{{ short_dir }}{% if pane[1] %} | {{ pane[1].short_dir }}{% endif %}"
 
 ```
 
-## Manual Tab Control
+## 5. Manual Tab Control
 
 By default, all tabs are auto-managed - the plugin renames them based on your format template. To manually rename a tab, first set it to manual mode, then rename it.
 
@@ -188,7 +191,7 @@ zellij pipe --name set_focused_to_manual --plugin smart-tabs
 
 This sets the focused tab to manual mode. Manual tabs are skipped by auto-rename.
 
-### Recommended keybinding
+### 5.1. Recommended keybinding
 
 Add this to your Zellij config (`~/.config/zellij/config.kdl`) to override the `r` key in tab mode and the `esc` key in renametab mode.
 
@@ -217,19 +220,19 @@ keybinds {
 }
 ```
 
-### Restore auto-management
+### 5.2. Restore auto-management
 
-Three ways to restore a manual tab to auto-management:
+Three ways to restore a manual tab to managed:
 
 1. **Pipe command** - run `zellij pipe --name set_focused_to_managed --plugin smart-tabs`
 2. **Clear the tab name** - rename the tab to an empty string (the plugin detects this and switches back to managed)
 3. **Esc in rename mode** - if using the recommended keybinding above, pressing `Esc` cancels the rename and restores managed mode
 
-## Pane Status
+## 6. Pane Status
 
 Programs can report their activity status to the plugin via pipe. The status is available as `{{ status }}` (first pane) in templates.
 
-### Setting status
+### 6.1. Setting status
 
 ```bash
 # From a program running inside a Zellij pane:
@@ -241,7 +244,7 @@ zellij pipe --name pane_status --plugin smart-tabs -- '{"pane_id": "'$ZELLIJ_PAN
 
 Status is freeform - you can send any string. The [default status substitutions](#default-status-substitutions) are applied automatically. Custom statuses without a substitution are shown as-is.
 
-### Claude Code integration
+### 6.2. Claude Code integration
 
 Use [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to automatically update pane status when Claude starts and finishes work.
 
@@ -291,7 +294,7 @@ This sets the pane status to `running` while Claude processes tool calls, `pendi
 
 For Linux desktop notifications and other integrations, see the helper scripts in [`scripts/linux/`](scripts/linux/).
 
-## Dashboard
+## 7. Dashboard
 
 The plugin pane shows a tabbed dashboard with keyboard and mouse navigation.
 
@@ -320,7 +323,7 @@ Debug logging is written to Zellij's log as JSON (enable with `debug "true"`); t
 
 Mouse click on the tab bar switches views. Mouse scroll works within views.
 
-## Alternatives
+## 8. Alternatives
 
 | Feature | zellij-smart-tabs | zellij-tabula | zellij-tab-rename | zellij-tab-name | opencode-zellij-namer |
 |---|---|---|---|---|---|
@@ -333,7 +336,7 @@ Mouse click on the tab bar switches views. Mouse scroll works within views.
 | **Dashboard UI** | Yes | No | No | No | No |
 | **Standalone** | Yes | Yes (zsh required) | Yes | Yes | No |
 
-## References
+## 99. References
 
 - [zellij-tabula](https://github.com/bezbac/zellij-tabula) - Tab renaming via zsh shell hook
 - [zellij-tab-rename](https://github.com/vmaerten/zellij-tab-rename) - Tab renaming with CwdChanged event
